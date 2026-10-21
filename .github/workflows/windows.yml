@@ -1,0 +1,43 @@
+name: ZL-WA Windows
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    env:
+      CI: true
+      CSC_IDENTITY_AUTO_DISCOVERY: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - uses: pnpm/action-setup@v4
+      - name: Install dependencies and Electron
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm exec install-electron
+      - name: Package service recipes
+        working-directory: recipes
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm package
+      - name: Check types and tests
+        run: |
+          pnpm typecheck
+          pnpm test --runInBand --coverage=false
+      - name: Build Windows x64
+        run: pnpm build:windows
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ZL-WA-Windows-x64
+          path: out/*.exe
+          if-no-files-found: error

@@ -1,0 +1,191 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+        font:
+          16px 'Segoe UI',
+          sans-serif;
+        background: #0b141a;
+        color: #e9edef;
+      }
+      #app {
+        height: 100%;
+        display: flex;
+      }
+      #side {
+        width: 130px;
+        background: #111b21;
+        border-right: 1px solid #29363c;
+        padding: 15px;
+      }
+      #main {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+      }
+      header {
+        padding: 18px;
+        background: #202c33;
+      }
+      #messages {
+        flex: 1;
+        padding: 25px;
+      }
+      .message-in {
+        background: #202c33;
+        padding: 14px;
+        max-width: 90%;
+        border-radius: 9px;
+        margin: 15px 0;
+      }
+      footer {
+        padding: 18px;
+        display: flex;
+        gap: 12px;
+        background: #202c33;
+      }
+      [contenteditable] {
+        min-height: 44px;
+        padding: 12px;
+        background: #2a3942;
+        border-radius: 8px;
+        flex: 1;
+        white-space: pre-wrap;
+      }
+      button {
+        background: #00a884;
+        color: white;
+        border: 0;
+        border-radius: 8px;
+        padding: 12px;
+      }
+      small {
+        display: block;
+        color: #91a2ac;
+        padding-top: 8px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <div id="side">
+        <strong>本地模拟</strong><small>没有登录真实账号</small>
+      </div>
+      <div id="main">
+        <header>
+          <span title="测试联系人" data-id="test-chat"
+            >测试联系人 · 本地测试会话</span
+          ><small>仅用于界面与流程验证，不连接 WhatsApp 服务器</small>
+        </header>
+        <div id="messages">
+          <div class="message-in">
+            <div class="copyable-text">
+              <span class="selectable-text"
+                >Hello, this is a local test message.</span
+              >
+            </div>
+          </div>
+        </div>
+        <footer>
+          <div
+            role="textbox"
+            contenteditable="true"
+            aria-label="消息输入框"
+          ></div>
+          <button aria-label="Send"><span data-icon="send">发送</span></button>
+        </footer>
+      </div>
+    </div>
+    <script>
+      window.fixture = { sent: [], bulk: [], fail: false };
+      const chats = [
+        {
+          id: { _serialized: '10001@g.us', server: 'g.us', user: '10001' },
+          name: '测试群组 A',
+        },
+        {
+          id: { _serialized: '10002@c.us', server: 'c.us', user: '10002' },
+          name: '测试联系人 B',
+        },
+      ];
+      class MsgKey {
+        static async newId() {
+          return crypto.randomUUID();
+        }
+        constructor(x) {
+          Object.assign(this, x);
+          this._serialized = x.id;
+        }
+      }
+      const modules = {
+        WAWebCollections: {
+          Chat: {
+            getModelsArray: () => chats,
+            get: id => chats.find(c => c.id._serialized === id),
+          },
+        },
+        WAWebSocketModel: { Socket: { state: 'CONNECTED' } },
+        WAWebConnModel: {
+          Conn: {
+            pushname: '本地测试账号',
+            wid: { server: 'c.us', user: '8613800000001' },
+          },
+        },
+        WAWebUserPrefsMeUser: {
+          getMaybeMePnUser: () => ({ server: 'c.us', user: '8613800000001' }),
+          getMaybeMeLidUser: () => ({ server: 'lid', user: '10001' }),
+        },
+        WAWebChatGetters: {
+          getActiveChat: () => ({
+            id: {
+              _serialized: document.querySelector('header span').dataset.id,
+            },
+          }),
+        },
+        WAWebMsgKey: MsgKey,
+        WAWebWidFactory: { asUserWidOrThrow: x => x },
+        WAWebGetEphemeralFieldsMsgActionsUtils: {
+          getEphemeralFields: () => ({}),
+        },
+        WAWebSendMsgChatAction: {
+          addAndSendMsgToChat: (chat, message) => {
+            fixture.bulk.push({ id: chat.id._serialized, text: message.body });
+            return [
+              Promise.resolve(message),
+              fixture.fail
+                ? Promise.reject(Error('synthetic server failure'))
+                : Promise.resolve('success'),
+            ];
+          },
+        },
+      };
+      window.require = name => {
+        if (!modules[name]) throw Error('unsupported ' + name);
+        return modules[name];
+      };
+      const editor = document.querySelector('[contenteditable]');
+      const send = () => {
+        if (editor.innerText.trim()) {
+          fixture.sent.push(editor.innerText);
+          editor.innerText = '';
+          editor.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+      };
+      document.querySelector('button').addEventListener('click', send);
+      editor.addEventListener('keydown', e => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          send();
+        }
+      });
+    </script>
+  </body>
+</html>

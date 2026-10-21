@@ -1,0 +1,4 @@
+# ZL-WA modification: development updates must also use our own repository.
+owner: zhenglin1885-arch
+repo: ZL-WA
+provider: github

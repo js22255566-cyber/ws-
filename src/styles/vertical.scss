@@ -1,0 +1,97 @@
+@use './globals.scss';
+@use './config.scss' as *;
+
+$sidebar-width: 75px;
+$sidebar-bias: 28px;
+$tabitem-bias: 30px;
+
+.sidebar {
+  width: 100vw;
+  height: $sidebar-width;
+  flex-direction: row;
+  position: absolute;
+  top: 0;
+  right: 0;
+  padding-bottom: 0px;
+  overflow: hidden !important;
+
+  .sidebar__services {
+    flex: 1 1 auto;
+    height: calc(100% - var(--webview-padding));
+    margin: var(--webview-padding) 0 0 var(--webview-padding);
+    min-width: 0;
+    overflow-y: hidden !important;
+    overflow-x: scroll !important;
+    width: auto;
+  }
+
+  .tabs {
+    flex-direction: row;
+    min-width: 0;
+    overflow-y: hidden;
+    overflow-x: scroll;
+    padding: 0;
+    width: 100%;
+
+    .tab-item {
+      &.is-active {
+        overflow: hidden;
+        height: $sidebar-width;
+      }
+
+      &.is-label-enabled {
+        flex-basis: 100px;
+        min-width: 100px;
+        max-width: 100px;
+        height: $sidebar-width + 10;
+        width: max-content !important;
+        overflow: hidden;
+      }
+
+      .tab-item__icon {
+        margin-left: 0;
+      }
+
+      &__label {
+        padding: 0;
+      }
+    }
+
+    &::-webkit-scrollbar {
+      display: none;
+    }
+  }
+  .sidebar__button:first-of-type {
+    box-shadow: -4px 0px 4px 0px $theme-gray-lightest;
+  }
+
+  .sidebar__button--workspaces.is-active {
+    background-color: #f7f7f9;
+    box-shadow: -4px 0px 4px 0px $theme-gray-lightest;
+  }
+}
+
+.app .app__content {
+  padding-top: $sidebar-width + $sidebar-bias;
+}
+
+.workspaces-drawer {
+  overflow: hidden;
+}
+
+.theme__dark {
+  .sidebar .sidebar__button--workspaces.is-active {
+    background-color: #2d2f31;
+  }
+}
+
+.darwin .sidebar {
+  height: $sidebar-width + $sidebar-bias;
+
+  .sidebar__button--workspaces.is-active {
+    height: $sidebar-width - $sidebar-bias;
+  }
+  .tab-item .is-label-enabled {
+    height: $sidebar-width + $tabitem-bias;
+  }
+}

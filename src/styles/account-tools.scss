@@ -1,0 +1,273 @@
+// ZL-WA right-hand account tools, scoped against upstream div { height:100% }.
+.account-tools {
+  display: flex;
+  flex: 0 0 auto;
+  height: 100%;
+  min-height: 0;
+  color: #f0f3fa;
+  background: #13151a;
+  border-left: 1px solid #292d36;
+  font:
+    14px 'Segoe UI',
+    'Microsoft YaHei',
+    sans-serif;
+  div {
+    height: auto;
+  }
+}
+.account-tools-rail {
+  width: 58px;
+  padding: 12px 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+  button {
+    border: none;
+    background: #292d36;
+    color: #eaf1fb;
+    border-radius: 10px;
+    font-size: 24px;
+    padding: 8px 3px;
+    cursor: pointer;
+  }
+  button[aria-pressed='true'] {
+    background: #0654df;
+  }
+  span {
+    display: block;
+    font-size: 12px;
+    margin-top: 5px;
+  }
+}
+.account-tools-panel {
+  width: 300px;
+  padding: 18px 16px;
+  overflow-y: auto;
+  box-sizing: border-box;
+  h2 {
+    font-size: 23px;
+    margin: 0 0 16px;
+  }
+}
+.account-tools-panel,
+.account-tools-dialog {
+  fieldset {
+    border: 0;
+    padding: 0;
+    min-width: 0;
+    margin: 0;
+  }
+  label {
+    display: block;
+    margin: 13px 0;
+  }
+  input:not([type='checkbox']),
+  select,
+  textarea {
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
+    background: #16191f;
+    color: #eaf1fb;
+    border: 1px solid #414650;
+    border-radius: 7px;
+    padding: 10px;
+    margin-top: 7px;
+    font: inherit;
+  }
+  textarea {
+    resize: vertical;
+    min-height: 75px;
+  }
+  button:not(.MuiButton-root) {
+    border: 1px solid #414650;
+    background: #262c36;
+    color: white;
+    border-radius: 7px;
+    padding: 9px 13px;
+    cursor: pointer;
+    margin: 5px 0;
+  }
+  button.tools-primary {
+    background: #0654df;
+    border-color: #0654df;
+    width: 100%;
+  }
+  button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  button.tools-link {
+    background: none;
+    border: none;
+    color: #79b3ff;
+    padding: 0;
+  }
+  .tools-check {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 0;
+    border-bottom: 1px solid #30353f;
+    margin: 0;
+  }
+  input[type='checkbox'] {
+    accent-color: #0654df;
+    width: 18px;
+    height: 18px;
+    flex: 0 0 18px;
+  }
+  small {
+    display: block;
+    color: #9aa4b5;
+    margin-top: 5px;
+  }
+}
+.tools-current {
+  color: #91bfff;
+  overflow-wrap: anywhere;
+}
+.tools-muted {
+  color: #9aa4b5;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.tools-info {
+  background: #1a2b43;
+  padding: 11px;
+  border-radius: 7px;
+  line-height: 1.6;
+}
+.tools-notice {
+  color: #93c0ff;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+}
+.tools-switch {
+  display: flex !important;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  position: relative;
+  input {
+    position: absolute;
+    right: 0;
+    opacity: 0;
+    cursor: pointer;
+  }
+  span {
+    width: 42px;
+    height: 24px;
+    border-radius: 20px;
+    background: #4b5059;
+    position: relative;
+    pointer-events: none;
+  }
+  span::after {
+    content: '';
+    position: absolute;
+    left: 3px;
+    top: 3px;
+    width: 18px;
+    height: 18px;
+    background: white;
+    border-radius: 50%;
+  }
+  input:checked + span {
+    background: #0654df;
+  }
+  input:checked + span::after {
+    left: 21px;
+  }
+  input:focus-visible + span {
+    outline: 2px solid #91bfff;
+  }
+}
+.account-tools-dialog {
+  .MuiPaper-root,
+  .MuiDialogTitle-root,
+  .MuiDialogContent-root,
+  .MuiDialogActions-root,
+  div {
+    height: auto;
+  }
+  .MuiPaper-root {
+    background: #15181e;
+    color: #f0f3fa;
+    border: 1px solid #30353f;
+  }
+  .MuiDialogContent-root {
+    overflow-y: auto;
+  }
+}
+.bulk-dialog > .MuiDialog-container > .MuiPaper-root {
+  min-height: 440px;
+  max-height: 90vh;
+}
+.bulk-columns {
+  display: grid;
+  grid-template-columns: 1fr 1.5fr 1.2fr;
+  gap: 20px;
+  fieldset {
+    min-width: 0;
+  }
+  h3 {
+    margin: 15px 0;
+  }
+}
+.bulk-recipient-list {
+  max-height: 350px;
+  overflow-y: auto;
+}
+.bulk-history article {
+  margin: 15px 0;
+  padding: 14px;
+  border: 1px solid #30353f;
+  border-radius: 8px;
+}
+.bulk-history progress {
+  width: 100%;
+  accent-color: #44ad38;
+}
+.bulk-record-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 150px;
+  overflow-y: auto;
+}
+@media (max-width: 1050px) {
+  .account-tools-panel {
+    width: 255px;
+  }
+  .bulk-columns {
+    grid-template-columns: 1fr 1fr;
+  }
+  .bulk-columns fieldset:last-child {
+    grid-column: 1 / -1;
+  }
+}
+// The modal container must retain full viewport height for vertical centering.
+.account-tools-dialog > .MuiDialog-container {
+  height: 100%;
+}
+.account-tools-dialog {
+  .MuiDialogTitle-root {
+    font-size: 21px;
+    font-weight: 600;
+  }
+  .MuiButton-root {
+    font-size: 14px;
+    min-height: 38px;
+  }
+  .MuiDialogContent-root {
+    font-size: 14px;
+  }
+}
+.account-tools-dialog .MuiButton-root {
+  color: #8bbaff;
+}
+.account-tools-dialog .MuiButton-contained {
+  background: #0654df;
+  color: white;
+}

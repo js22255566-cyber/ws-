@@ -1,0 +1,182 @@
+@use 'sass:color';
+
+@use './config.scss' as *;
+
+.theme__dark .franz-form__button {
+  background: $theme-brand-primary;
+  color: $dark-theme-text-color;
+
+  &:hover {
+    background: color.adjust($theme-brand-primary, $lightness: -5%);
+  }
+  &:active {
+    background: color.adjust($theme-brand-primary, $lightness: 5%);
+  }
+
+  &.franz-form__button--secondary {
+    background: $dark-theme-gray-dark;
+    color: $dark-theme-text-color;
+
+    &:hover {
+      background: color.adjust($dark-theme-gray-dark, $lightness: 10%);
+    }
+    &:active {
+      background: color.adjust($dark-theme-gray-dark, $lightness: 20%);
+    }
+  }
+
+  &.franz-form__button--danger {
+    background: $theme-brand-danger;
+
+    &:hover {
+      background: color.adjust($theme-brand-danger, $lightness: -5%);
+    }
+    &:active {
+      background: color.adjust($theme-brand-danger, $lightness: 5%);
+    }
+  }
+
+  &.franz-form__button--warning {
+    background: $theme-brand-warning;
+
+    &:hover {
+      background: color.adjust($theme-brand-warning, $lightness: -5%);
+    }
+    &:active {
+      background: color.adjust($theme-brand-warning, $lightness: 5%);
+    }
+  }
+
+  &.franz-form__button--inverted {
+    border: 2px solid $theme-brand-primary;
+    color: $theme-brand-primary;
+
+    &:hover {
+      background: color.adjust($theme-brand-primary, $lightness: -5%);
+      color: $dark-theme-text-color;
+    }
+  }
+
+  &:disabled {
+    opacity: 0.5;
+  }
+}
+
+.franz-form__button {
+  background: $theme-brand-primary;
+  border-radius: 3px;
+  display: block;
+  color: #fff;
+  padding: 10px 20px;
+  position: relative;
+  @media (prefers-reduced-motion: no-preference) {
+    transition: background 0.5s;
+  }
+  text-align: center;
+
+  &:hover {
+    background: color.adjust($theme-brand-primary, $lightness: -5%);
+  }
+
+  &:active {
+    background: color.adjust($theme-brand-primary, $lightness: 5%);
+    transition: none;
+  }
+
+  &:disabled {
+    opacity: 0.2;
+  }
+
+  &.franz-form__button--large {
+    width: 100%;
+    margin-bottom: 20px;
+  }
+
+  &.franz-form__button--secondary {
+    background: $theme-gray-lighter;
+    color: $theme-gray;
+
+    &:hover {
+      background: color.adjust($theme-gray-lighter, $lightness: -5%);
+    }
+    &:active {
+      background: color.adjust($theme-gray-lighter, $lightness: 5%);
+    }
+  }
+
+  &.franz-form__button--danger {
+    background: $theme-brand-danger;
+
+    &:hover {
+      background: color.adjust($theme-brand-danger, $lightness: -5%);
+    }
+    &:active {
+      background: color.adjust($theme-brand-danger, $lightness: 5%);
+    }
+  }
+
+  &.franz-form__button--warning {
+    background: $theme-brand-warning;
+
+    &:hover {
+      background: color.adjust($theme-brand-warning, $lightness: -5%);
+    }
+    &:active {
+      background: color.adjust($theme-brand-warning, $lightness: 5%);
+    }
+  }
+
+  &.franz-form__button--inverted {
+    background: none;
+    border: 2px solid $theme-brand-primary;
+    color: $theme-brand-primary;
+    padding: 10px 20px;
+    @media (prefers-reduced-motion: no-preference) {
+      transition:
+        background 0.5s,
+        color 0.5s;
+    }
+    &:hover {
+      background: color.adjust($theme-brand-primary, $lightness: -5%);
+      color: #fff;
+    }
+  }
+
+  .loader {
+    display: inline-block;
+    height: 12px;
+    margin-right: 5px;
+    position: relative;
+    width: 20px;
+    z-index: 9999;
+  }
+}
+
+.ferdium__fab {
+  box-sizing: border-box;
+
+  width: 50px;
+  height: 50px;
+
+  border-radius: 25px;
+  white-space: nowrap;
+  z-index: 9998;
+  list-style: none;
+  background: $theme-brand-primary;
+
+  position: absolute;
+  bottom: 20px;
+  right: 20px;
+
+  cursor: pointer;
+
+  display: flex;
+  justify-content: center;
+  align-items: center;
+
+  a {
+    font-size: 30px;
+    color: #ffffff;
+    cursor: pointer;
+  }
+}
