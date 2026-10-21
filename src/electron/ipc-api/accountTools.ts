@@ -363,6 +363,15 @@ export default ({ mainWindow }: { mainWindow: BrowserWindow }) => {
         await (prepared.has(id) ? prepared.get(id) : apply(id, get(id)));
         const engine = direction === 'incoming' ? t.receiveEngine : t.engine;
         const config = get(id);
+        if (
+          JSON.stringify([
+            config.translation,
+            config.providers,
+            config.encryptedKeys,
+          ]) !==
+          JSON.stringify([t, savedConfig.providers, savedConfig.encryptedKeys])
+        )
+          return { text: '', error: true };
         const s = session.fromPartition(`persist:service-${id}`);
         const repeated = translationCache.get(key);
         if (repeated !== undefined) return { text: repeated, error: false };

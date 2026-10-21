@@ -128,6 +128,36 @@ describe('privileged account tools IPC', () => {
     await invoke('translate', 'account-2', 'cache source', 'incoming');
     expect(translate).toHaveBeenCalledTimes(3);
   });
+  it('does not associate a new model response with an old cache key while session preparation is pending', async () => {
+    const config = defaultTools();
+    config.translation.incoming = true;
+    await invoke('save', 'account-1', config);
+    let release!: () => void;
+    sessions.get('persist:service-account-1').setProxy.mockImplementationOnce(
+      () =>
+        new Promise<void>(resolve => {
+          release = resolve;
+        }),
+    );
+    const preparation = invoke('prepare', 'account-1');
+    while (!release) await Promise.resolve();
+    const request = invoke(
+      'translate',
+      'account-1',
+      'pending model',
+      'incoming',
+    );
+    await invoke('save', 'account-1', {
+      ...config,
+      providers: { Google: { model: 'changed-model' } },
+    });
+    release();
+    await preparation;
+    expect(await request).toMatchObject({ error: true });
+    expect(
+      require('../src/electron/accountTranslation').translateAccount,
+    ).not.toHaveBeenCalled();
+  });
   it('deleting selected local history preserves other records and account settings', async () => {
     await invoke('save', 'account-1', defaultTools());
     const record = {
