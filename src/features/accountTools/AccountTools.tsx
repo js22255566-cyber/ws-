@@ -348,7 +348,7 @@ const SettingsPanel = observer(
                   onChange={incoming =>
                     translation({
                       incoming,
-                      ...(!incoming ? { preview: false } : {}),
+                      ...(incoming ? {} : { preview: false }),
                     })
                   }
                 />

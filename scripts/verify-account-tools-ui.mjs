@@ -191,7 +191,7 @@ try {
     );
     await clickText('应用并测试发送翻译');
     await wait(
-      `document.querySelector('.tools-notice')?.textContent.includes(${JSON.stringify(engine + ' 需要填写 API Key')})`,
+      `document.querySelector('.tools-notice')?.textContent.includes(${JSON.stringify(`${engine} 需要填写 API Key`)})`,
       'provider requires user key',
     );
   }
