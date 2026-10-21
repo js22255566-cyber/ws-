@@ -26,6 +26,10 @@ export function translationTick(
       config,
       incoming: new WeakMap(),
       activeChat: '',
+      memo: new Map(),
+      dirty: true,
+      lastScan: 0,
+      settleUntil: 0,
     };
     page.__zlTranslation = state;
     // Emoji decorators can be IMG/contenteditable=false nodes. innerText alone
@@ -122,6 +126,76 @@ export function translationTick(
     state.notice = notice;
     state.composer = composer;
     state.chatKey = chatKey;
+    // Adjust only for our own added/removed translation height. Never force a
+    // chat to the bottom if WhatsApp/user has selected an unread/history anchor.
+    state.withScroll = (node: Element | null, mutate: () => void) => {
+      let scroller = node?.parentElement;
+      while (
+        scroller &&
+        !(
+          scroller.clientHeight > 100 &&
+          /auto|scroll/.test(getComputedStyle(scroller).overflowY)
+        )
+      )
+        scroller = scroller.parentElement;
+      if (!scroller) {
+        mutate();
+        return;
+      }
+      const pinned =
+        scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop < 8;
+      const bounds = scroller.getBoundingClientRect();
+      const anchor = [
+        ...scroller.querySelectorAll<HTMLElement>(
+          '[data-id], .message-in, .message-out, [data-pre-plain-text]',
+        ),
+      ].find(n => n.getBoundingClientRect().bottom > bounds.top + 1);
+      const before = anchor?.getBoundingClientRect().top;
+      mutate();
+      if (pinned)
+        scroller.scrollTop = scroller.scrollHeight - scroller.clientHeight;
+      else if (anchor?.isConnected && before !== undefined)
+        scroller.scrollTop += anchor.getBoundingClientRect().top - before;
+    };
+    state.receiveKey = (c: TranslationConfig) =>
+      JSON.stringify([
+        c.receiveEngine,
+        c.receiveSource,
+        c.receiveTarget,
+        c.cacheRevision,
+      ]);
+    state.signature = state.receiveKey(config);
+    state.remember = (key: string, text: string) => {
+      state.memo.delete(key);
+      state.memo.set(key, text);
+      if (state.memo.size > 800)
+        state.memo.delete(state.memo.keys().next().value);
+    };
+    state.restore = (record: any, text: string) => {
+      const current = record;
+      state.withScroll(current.container, () => {
+        current.status = 'done';
+        current.label.textContent = text;
+        current.container.style.borderTop = '1px dashed #ffe45c';
+        current.button.disabled = false;
+        current.button.hidden = true;
+        current.button.style.display = 'none';
+      });
+    };
+    state.cancelPending = () => {
+      for (const job of state.pending.values()) {
+        const current = job.record;
+        if (job.direction === 'incoming' && current?.status === 'pending') {
+          current.status = 'idle';
+          current.button.disabled = false;
+          current.button.textContent = '点击翻译';
+          current.autoAttempted = true;
+        }
+      }
+      state.pending.clear();
+      state.queue = [];
+      state.busy = false;
+    };
     const intercept = (event: Event) => {
       if (!state.config.outgoing) return;
       const input = composer();
@@ -231,21 +305,42 @@ export function translationTick(
       true,
     );
     // Changing chats invalidates an approved composer, even if React reuses its node.
-    state.observer = new MutationObserver(() => {
+    state.observer = new MutationObserver(changes => {
+      if (
+        changes.every(
+          change =>
+            (change.target as Element).closest?.('[data-zl-translation]') ||
+            (change.type === 'childList' &&
+              [...change.addedNodes, ...change.removedNodes].length > 0 &&
+              [...change.addedNodes, ...change.removedNodes].every(
+                n =>
+                  n.nodeType === 1 &&
+                  (n as Element).matches('[data-zl-translation]'),
+              )),
+        )
+      )
+        return;
+      state.dirty = true;
       const next = chatKey();
       if (next !== state.activeChat) {
         if (state.approved || state.busy)
           notice('聊天已切换，消息未发送；请重新翻译');
         state.approved = null;
-        for (const [id, job] of state.pending) {
-          if (job.direction === 'outgoing') state.pending.delete(id);
-        }
-        state.busy = false;
-        state.queue = state.queue.filter(job => job.direction !== 'outgoing');
+        state.cancelPending();
         state.activeChat = next;
+        state.previewBlockedChat = undefined;
+        state.settleUntil = Date.now() + 500;
       }
     });
     state.activeChat = chatKey();
+    state.previewBlockedChat = config.preview ? state.activeChat : undefined;
+    document.addEventListener(
+      'scroll',
+      () => {
+        state.dirty = true;
+      },
+      { capture: true, passive: true },
+    );
     state.observer.observe(document.body, {
       childList: true,
       subtree: true,
@@ -257,15 +352,29 @@ export function translationTick(
   if (JSON.stringify(state.config) !== JSON.stringify(config)) {
     state.approved = null;
     state.failedReplacement = null;
-    state.pending.clear();
-    state.queue = [];
-    state.busy = false;
-    state.incoming = new WeakMap();
-    document.querySelectorAll('[data-zl-translation]').forEach(n => n.remove());
+    state.cancelPending();
+    if (state.signature !== state.receiveKey(config) || !config.incoming) {
+      state.incoming = new WeakMap();
+      state.withScroll(document.querySelector('[data-zl-translation]'), () =>
+        document
+          .querySelectorAll('[data-zl-translation]')
+          .forEach(n => n.remove()),
+      );
+    }
+    if (config.preview && (!state.config.preview || !state.config.incoming))
+      state.previewBlockedChat = state.chatKey();
+    state.signature = state.receiveKey(config);
+    state.dirty = true;
     state.notice('');
   }
   state.config = config;
-  if (config.incoming) {
+  const scan =
+    config.incoming &&
+    Date.now() >= state.settleUntil &&
+    (state.dirty || Date.now() - state.lastScan > 1500);
+  if (scan) {
+    state.dirty = false;
+    state.lastScan = Date.now();
     // Prefer semantic body markers, not WhatsApp's changing generated classes.
     const bodies = new Set<HTMLElement>();
     const scope =
@@ -283,7 +392,15 @@ export function translationTick(
       }
     }
     const seen = new Set<HTMLElement>();
+    let processed = 0;
     for (const body of bodies) {
+      const rect = body.getBoundingClientRect();
+      if (
+        rect.bottom < 0 ||
+        rect.top > window.innerHeight + 80 ||
+        rect.height === 0
+      )
+        continue;
       const textNode = [
         body,
         ...body.querySelectorAll<HTMLElement>(
@@ -306,6 +423,8 @@ export function translationTick(
       );
       if (!textNode || seen.has(textNode)) continue;
       seen.add(textNode);
+      if (processed >= 24) break;
+      processed += 1;
       const bubble =
         textNode.closest<HTMLElement>(
           '.message-in, .message-out, [data-id], [data-testid="msg-container"], [role="row"]',
@@ -340,11 +459,15 @@ export function translationTick(
           'display:inline-flex;align-items:center;border:0;border-radius:5px;background:#175aff;color:#fff;padding:7px 10px;margin:4px 0;cursor:pointer;font:13px/1.4 sans-serif';
         container.append(label, button);
         const mount = textNode.closest('.copyable-text');
-        if (mount && mount !== textNode) mount.append(container);
-        else textNode.after(container);
+        state.withScroll(textNode, () => {
+          if (mount && mount !== textNode) mount.append(container);
+          else textNode.after(container);
+        });
         record = {
           text,
           identity,
+          chat: state.chatKey(),
+          cacheKey: JSON.stringify([state.signature, text]),
           container,
           label,
           button,
@@ -356,12 +479,16 @@ export function translationTick(
         current.request = (manual: boolean) => {
           if (
             !state.config.incoming ||
+            current.chat !== state.chatKey() ||
             current.status === 'pending' ||
             !textNode.isConnected ||
             state.readText(textNode) !== current.text
           )
             return;
-          if (state.pending.size >= 12) {
+          if (
+            (!manual && state.pending.size >= 2) ||
+            state.pending.size >= 12
+          ) {
             button.title = '翻译队列繁忙，请稍后点击重试';
             return;
           }
@@ -378,6 +505,8 @@ export function translationTick(
             text: current.text,
             bubble,
             record: current,
+            chat: current.chat,
+            cacheKey: current.cacheKey,
           });
           const request = {
             id,
@@ -394,10 +523,25 @@ export function translationTick(
           current.request(true);
         });
       }
-      if (config.preview && !record.autoAttempted) record.request(false);
+      const cached = state.memo.get(record.cacheKey);
+      if (cached && record.status !== 'done') state.restore(record, cached);
+      if (
+        config.preview &&
+        state.previewBlockedChat !== state.chatKey() &&
+        !record.autoAttempted &&
+        record.status !== 'done'
+      )
+        record.request(false);
     }
-  } else
-    document.querySelectorAll('[data-zl-translation]').forEach(n => n.remove());
+  } else if (
+    !config.incoming &&
+    document.querySelector('[data-zl-translation]')
+  )
+    state.withScroll(document.querySelector('[data-zl-translation]'), () =>
+      document
+        .querySelectorAll('[data-zl-translation]')
+        .forEach(n => n.remove()),
+    );
   return drain ? state.queue.splice(0, 4) : [];
 }
 
@@ -511,25 +655,36 @@ export function translationResult(
   }
   state.pending.delete(id);
   const { record } = job;
+  if (!result.error && result.text?.trim() && job.cacheKey)
+    state.remember(job.cacheKey, result.text);
+  state.dirty = true;
   if (
     !state.config.incoming ||
+    (job.chat && state.chatKey() !== job.chat) ||
     !job.input.isConnected ||
     state.readText(job.input) !== job.text ||
     !record?.container.isConnected ||
     state.incoming.get(job.input) !== record
   )
     return false;
-  record.button.disabled = false;
-  record.button.textContent = '点击翻译';
   if (result.error || !result.text?.trim()) {
-    record.status = 'error';
-    record.label.textContent = `${result.message || '翻译失败'}；可点击重试`;
-    record.button.hidden = false;
-    record.button.style.display = 'inline-flex';
-  } else {
+    const showError = () => {
+      record.button.disabled = false;
+      record.button.textContent = '点击翻译';
+      record.status = 'error';
+      record.label.textContent = `${result.message || '翻译失败'}；可点击重试`;
+      record.button.hidden = false;
+      record.button.style.display = 'inline-flex';
+    };
+    if (state.withScroll) state.withScroll(record.container, showError);
+    else showError();
+  } else if (state.restore) state.restore(record, result.text);
+  else {
     record.status = 'done';
     record.label.textContent = result.text;
     record.container.style.borderTop = '1px dashed #ffe45c';
+    record.button.disabled = false;
+    record.button.textContent = '点击翻译';
     record.button.hidden = true;
     record.button.style.display = 'none';
   }
@@ -551,7 +706,13 @@ export function translationDiagnostics() {
     '[data-zl-translation-text]',
   ];
   return {
-    version: 5,
+    version: 7,
+    cachedEntries: state?.memo?.size ?? 0,
+    deferredPreview: Boolean(
+      state?.config?.preview &&
+        state?.previewBlockedChat === state?.chatKey?.(),
+    ),
+    visibleOnly: true,
     whatsapp: globalThis.location.hostname === 'web.whatsapp.com',
     enabled: Boolean(state?.config?.incoming),
     preview: Boolean(state?.config?.preview),

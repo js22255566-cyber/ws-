@@ -39,13 +39,10 @@ export function startTranslations(stores: RealStores): () => void {
   let stopped = false;
   const running = new Set<string>();
   const pending = new Set<string>();
-  const cache = new Map<
-    string,
-    { text: string; error: boolean; message?: string }
-  >();
   const tick = async (service: RealStores['services']['all'][number]) => {
     const view = service.webview;
     if (
+      stores.services.active !== service ||
       !view ||
       service.isHibernating ||
       service.isLoading ||
@@ -70,26 +67,15 @@ export function startTranslations(stores: RealStores): () => void {
           continue;
         }
         pending.add(requestKey);
-        const key = JSON.stringify([
-          service.id,
-          c.translation,
-          job.direction,
-          job.text,
-        ]);
         void (async () => {
-          let result = cache.get(key);
+          let result: { text: string; error: boolean; message?: string };
           try {
-            if (!result)
-              result = await ipcRenderer.invoke(
-                'account-tools-translate',
-                service.id,
-                job.text,
-                job.direction,
-              );
-            if (result && !result.error) {
-              if (cache.size > 500) cache.clear();
-              cache.set(key, result);
-            }
+            result = await ipcRenderer.invoke(
+              'account-tools-translate',
+              service.id,
+              job.text,
+              job.direction,
+            );
           } catch {
             result = { text: '', error: true };
           }
@@ -164,6 +150,5 @@ export function startTranslations(stores: RealStores): () => void {
     bulk.dispose();
     clearInterval(timer);
     configs.clear();
-    cache.clear();
   };
 }

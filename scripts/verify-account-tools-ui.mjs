@@ -40,6 +40,7 @@ execFileSync(
 const ids = [];
 let mainPatched = false;
 let sidebarBefore;
+let bulkPreferencesBefore;
 const vm = async code =>
   evaluate(
     `require('@electron/remote').require('node:vm').runInThisContext(${JSON.stringify(code)})`,
@@ -77,6 +78,12 @@ try {
   );
   if (await evaluate('!!document.querySelector(".account-dialog")'))
     await clickText('取消');
+  bulkPreferencesBefore = await evaluate(
+    `require('electron').ipcRenderer.invoke('account-tools-bulk-preferences')`,
+  );
+  await evaluate(
+    `require('electron').ipcRenderer.invoke('account-tools-bulk-preferences',{})`,
+  );
   const before = await evaluate(
     'window.ferdium.stores.services.all.map(s=>s.id)',
   );
@@ -243,7 +250,7 @@ try {
   await vm('globalThis.__zlTranslateFail=true;true');
   await guest(
     first,
-    `document.querySelector('#messages').insertAdjacentHTML('beforeend','<div class="message-in" id="manual-retry"><div class="copyable-text"><span class="selectable-text">A unique retry test.</span></div></div>');true`,
+    `document.querySelector('#messages').insertAdjacentHTML('beforeend','<div class="message-in" id="manual-retry"><div class="copyable-text"><span class="selectable-text">A unique retry test ${Date.now()}.</span></div></div>');true`,
   );
   await wait(
     `${service(first)}.webview.executeJavaScript('!!document.querySelector("#manual-retry [data-zl-translate]")')`,
@@ -270,10 +277,27 @@ try {
     'PASS receive toggle adds manual translate to incoming and sent messages, no automatic requests, retry works without resending',
   );
   await vm('globalThis.__zlTranslateFail=true;true');
+  await guest(
+    first,
+    `document.querySelector('#messages').insertAdjacentHTML('beforeend','<div class="message-in" id="preview-fresh"><div class="copyable-text"><span class="selectable-text">Deferred preview ${Date.now()}.</span></div></div>');true`,
+  );
+  const beforePreview = await vm('globalThis.__zlTranslationCalls');
   await switchTranslation('翻译预览');
+  await new Promise(resolve => {
+    setTimeout(resolve, 1000);
+  });
+  assert.equal(
+    await vm('globalThis.__zlTranslationCalls'),
+    beforePreview,
+    'enabling preview does not bulk translate the current chat',
+  );
+  await guest(
+    first,
+    `document.querySelector('header span').dataset.id='preview-next-chat';true`,
+  );
   await wait(
-    `${service(first)}.webview.executeJavaScript('[...document.querySelectorAll("[data-zl-translate]")].every(n=>!n.disabled && n.textContent==="点击翻译") && [...document.querySelectorAll("[data-zl-translation-text]")].every(n=>n.textContent.includes("重试"))')`,
-    'preview errors retain manual buttons',
+    `${service(first)}.webview.executeJavaScript('document.querySelector("#preview-fresh [data-zl-translation-text]")?.textContent.includes("重试")')`,
+    'newly opened chat preview failure',
   );
   const failedCalls = await vm('globalThis.__zlTranslationCalls');
   await new Promise(resolve => {
@@ -287,17 +311,22 @@ try {
   await vm('globalThis.__zlTranslateFail=false;true');
   await guest(
     first,
-    `document.querySelector('.message-out [data-zl-translate]').click();true`,
+    `document.querySelector('#preview-fresh [data-zl-translate]').click();true`,
   );
   await wait(
-    `${service(first)}.webview.executeJavaScript('document.querySelector(".message-out [data-zl-translation-text]").textContent').then(t=>t.includes('你好'))`,
+    `${service(first)}.webview.executeJavaScript('document.querySelector("#preview-fresh [data-zl-translation-text]").textContent.includes("你好")')`,
     'preview fallback manual retry',
   );
+  await guest(first, `document.querySelector('#preview-fresh').remove();true`);
   await switchTranslation('翻译预览');
   await switchTranslation('翻译预览');
+  await guest(
+    first,
+    `document.querySelector('header span').dataset.id='preview-next-again';true`,
+  );
   await wait(
     `${service(first)}.webview.executeJavaScript('[...document.querySelectorAll("[data-zl-translation-text]")].every(n=>n.textContent.includes("你好"))')`,
-    'preview automatically translates both directions',
+    'cached previews restore both directions',
   );
   await shot('/workspace/ZL-WA-message-preview.png');
   await switchTranslation('接收翻译（收发消息）');
@@ -335,6 +364,89 @@ try {
   );
   await guest(
     first,
+    `(()=>{const state=window.__zlTranslation;const text=document.querySelector('.selectable-text');const record=state.incoming.get(text);record.status='pending';record.button.disabled=true;state.pending.set(999999,{direction:'incoming',record});window.__zlPendingRecord=record;return true})()`,
+  );
+  await switchTranslation('发送自动翻译');
+  await wait(
+    `${service(first)}.webview.executeJavaScript('!window.__zlPendingRecord.button.disabled && window.__zlTranslation.pending.size===0')`,
+    'configuration changes release canceled preview buttons',
+  );
+  await switchTranslation('发送自动翻译');
+  // Large history: only the viewport is decorated/translated, and plugin reflow
+  // preserves WhatsApp's bottom or the user's history anchor.
+  const originalMessages = await guest(
+    first,
+    `(()=>{const c=document.querySelector('#messages').cloneNode(true);c.querySelectorAll('[data-zl-translation]').forEach(n=>n.remove());return c.innerHTML})()`,
+  );
+  const originalMessagesStyle = await guest(
+    first,
+    `document.querySelector('#messages').style.cssText`,
+  );
+  const previewCallsBefore = await vm('globalThis.__zlTranslationCalls');
+  await guest(
+    first,
+    `(()=>{const list=document.querySelector('#messages');list.style.cssText='height:260px;flex:none;overflow-y:auto';list.innerHTML=Array.from({length:90},(_,i)=>'<div class="message-in" data-id="perf-'+i+'" style="min-height:32px"><div class="copyable-text"><span class="selectable-text">Viewport preview ${Date.now()} '+i+'</span></div></div>').join('');list.scrollTop=list.scrollHeight;document.querySelector('header span').dataset.id='performance-chat';return true})()`,
+  );
+  await wait(
+    `${service(first)}.webview.executeJavaScript('document.querySelectorAll("#messages [data-zl-translation-text]").length>=2')`,
+    'visible history preview',
+  );
+  await new Promise(resolve => {
+    setTimeout(resolve, 1800);
+  });
+  assert(
+    (await vm('globalThis.__zlTranslationCalls')) - previewCallsBefore < 20,
+    '90 loaded history messages must not cause 90 translations',
+  );
+  assert(
+    await guest(
+      first,
+      `(()=>{const list=document.querySelector('#messages');return list.scrollHeight-list.clientHeight-list.scrollTop<3})()`,
+    ),
+    'translation insertion keeps an already pinned chat at its native bottom',
+  );
+  const anchor = await guest(
+    first,
+    `(()=>{const list=document.querySelector('#messages');list.scrollTop=300;const top=list.getBoundingClientRect().top;const row=[...list.children].find(n=>n.getBoundingClientRect().bottom>top+1);return {id:row.dataset.id,top:row.getBoundingClientRect().top}})()`,
+  );
+  await new Promise(resolve => {
+    setTimeout(resolve, 1800);
+  });
+  const anchorAfter = await guest(
+    first,
+    `document.querySelector('[data-id="${anchor.id}"]').getBoundingClientRect().top`,
+  );
+  assert(
+    Math.abs(anchorAfter - anchor.top) < 3,
+    'translating history never jumps the user to the bottom',
+  );
+  await wait(
+    `${service(first)}.webview.executeJavaScript('window.__zlTranslation.pending.size===0')`,
+    'visible preview queue drained',
+  );
+  const cachedCalls = await vm('globalThis.__zlTranslationCalls');
+  await guest(
+    first,
+    `(()=>{const list=document.querySelector('#messages');list.innerHTML='<div class="message-in"><div class="copyable-text"><span class="selectable-text">Hello, this is a local test message.</span></div></div>';document.querySelector('header span').dataset.id='cached-return-chat';return true})()`,
+  );
+  await wait(
+    `${service(first)}.webview.executeJavaScript('document.querySelector("#messages [data-zl-translation-text]")?.textContent.includes("你好")')`,
+    'cached translation restores after DOM remount',
+  );
+  assert.equal(
+    await vm('globalThis.__zlTranslationCalls'),
+    cachedCalls,
+    'returning to translated text must not invoke the provider again',
+  );
+  await guest(
+    first,
+    `document.querySelector('#messages').innerHTML=${JSON.stringify(originalMessages)};document.querySelector('#messages').style.cssText=${JSON.stringify(originalMessagesStyle)};document.querySelector('header span').dataset.id='test-chat';true`,
+  );
+  console.log(
+    'PASS deferred preview, visible-only work, cached DOM remount, pinned-bottom reflow and history-anchor preservation',
+  );
+  await guest(
+    first,
     `(()=>{let i=0;for(const row of document.querySelector('#messages').children){const original=row.querySelector('.selectable-text')?.textContent;if(!original)continue;row.className='';row.dataset.id='opaque-message-'+(++i);row.replaceChildren();const body=document.createElement('div');body.dataset.prePlainText='synthetic';const text=document.createElement('span');text.dir='auto';text.textContent=original;body.append(text);row.append(body)}return true})()`,
   );
   await wait(
@@ -362,7 +474,7 @@ try {
   );
   await clickText('复制页面诊断');
   const report = await evaluate(`require('electron').clipboard.readText()`);
-  assert.equal(JSON.parse(report).version, 5);
+  assert.equal(JSON.parse(report).version, 7);
   assert.equal(JSON.parse(report).counts['[data-zl-translate]'], 3);
   assert(
     !report.includes('8613800000001') &&
@@ -820,6 +932,27 @@ try {
     'PASS native attachment picker copies media, media adapter records its message ID, revoke requests delete-for-everyone and updates revoke history',
   );
 
+  await clickText('新建转发');
+  await evaluate(
+    `(()=>{const n=document.querySelector('#bulk-failure');Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value').set.call(n,'continue');n.dispatchEvent(new Event('change',{bubbles:true}));const t=document.querySelector('#bulk-min');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(t,'4.5');t.dispatchEvent(new Event('input',{bubbles:true}));})()`,
+  );
+  await clickText('关闭');
+  await clickText('☷群发');
+  await clickText('新建转发');
+  await wait(
+    `document.querySelector('#bulk-failure')?.value==='continue' && document.querySelector('#bulk-min')?.value==='4.5'`,
+    'bulk preferences survive closing and reopening',
+  );
+  assert.equal(
+    await evaluate(
+      `document.querySelectorAll('.bulk-recipient-list input:checked').length`,
+    ),
+    0,
+    'remember settings without silently restoring recipients',
+  );
+  console.log(
+    'PASS bulk settings persist on immediate close/reopen without carrying over recipient selection',
+  );
   await clickText('关闭');
   // Delete only fixtures created by this run, using the existing real delete action.
   for (const id of ids) {
@@ -854,6 +987,14 @@ try {
   } catch {
     /* App may have closed. */
   }
+  if (bulkPreferencesBefore)
+    try {
+      await evaluate(
+        `require('electron').ipcRenderer.invoke('account-tools-bulk-preferences',${JSON.stringify(bulkPreferencesBefore)})`,
+      );
+    } catch {
+      /* App may have closed. */
+    }
   if (mainPatched)
     try {
       await vm(

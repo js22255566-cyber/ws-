@@ -17,6 +17,7 @@ import { ensureBulkLibrary, getBulkQueue } from './bulkRuntime';
 import { validateBulkSpec } from './BulkQueue';
 import BulkHistory from './BulkHistory';
 import { normalizeAccountConfig } from '../accounts/state';
+import { normalizeBulkPreferences } from './bulkPreferences';
 
 const messageTypes: [BulkMessageType, string][] = [
   ['text', '文本'],
@@ -57,11 +58,85 @@ const BulkSend = observer(
     const [submitting, setSubmitting] = useState(false);
     const [confirm, setConfirm] = useState<BulkSpec>();
     const generation = useRef(0);
+    const [preferencesReady, setPreferencesReady] = useState(false);
+    const pendingPreferences =
+      useRef<ReturnType<typeof normalizeBulkPreferences>>();
+    useEffect(() => {
+      let mounted = true;
+      void ipcRenderer
+        .invoke('account-tools-bulk-preferences')
+        .then(value => {
+          if (!mounted) return;
+          const prefs = normalizeBulkPreferences(value);
+          setType(prefs.type);
+          setScheduled(prefs.scheduled);
+          setRandomInterval(prefs.randomInterval);
+          setIntervalMin(prefs.intervalMin);
+          setIntervalMax(prefs.intervalMax);
+          setTypingSeconds(prefs.typingSeconds);
+          setMentionAll(prefs.mentionAll);
+          setFailure(prefs.failure);
+          setKind(prefs.kind);
+          setPreferencesReady(true);
+        })
+        .catch(() => {
+          if (mounted) {
+            setPreferencesReady(true);
+            setNotice('群发设置读取失败，暂时使用默认值');
+          }
+        });
+      return () => {
+        mounted = false;
+        if (pendingPreferences.current)
+          void ipcRenderer
+            .invoke(
+              'account-tools-bulk-preferences',
+              pendingPreferences.current,
+            )
+            .catch(() => {});
+      };
+    }, []);
+    useEffect(() => {
+      if (!preferencesReady) return () => {};
+      const prefs = normalizeBulkPreferences({
+        type,
+        scheduled,
+        randomInterval,
+        intervalMin,
+        intervalMax,
+        typingSeconds,
+        mentionAll,
+        failure,
+        kind,
+      });
+      pendingPreferences.current = prefs;
+      const timer = setTimeout(() => {
+        void ipcRenderer
+          .invoke('account-tools-bulk-preferences', prefs)
+          .then(() => {
+            if (pendingPreferences.current === prefs)
+              pendingPreferences.current = undefined;
+          })
+          .catch(() => setNotice('群发设置保存失败，请检查数据目录后重试'));
+      }, 300);
+      return () => clearTimeout(timer);
+    }, [
+      preferencesReady,
+      type,
+      scheduled,
+      randomInterval,
+      intervalMin,
+      intervalMax,
+      typingSeconds,
+      mentionAll,
+      failure,
+      kind,
+    ]);
     const profiles = normalizeAccountConfig(
       stores.settings.app.accountSidebar,
     ).accounts;
     const running = Boolean(queue.activeId);
-    const disabled = running || loading || submitting;
+    const disabled = running || loading || submitting || !preferencesReady;
     const online = stores.services.all.filter(
       s =>
         s.recipe.id === 'whatsapp' &&

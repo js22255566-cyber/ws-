@@ -21,6 +21,11 @@ import { createSocksBridge } from '../socksProxy';
 import { accountTransport } from '../accountTransport';
 import TranslationQueue from '../../features/accountTools/TranslationQueue';
 import initBulkMedia from './bulkMedia';
+import TranslationCache from '../TranslationCache';
+import {
+  normalizeBulkPreferences,
+  type BulkPreferences,
+} from '../../features/accountTools/bulkPreferences';
 
 type StoredConfig = ToolsConfig & {
   encryptedPassword?: string;
@@ -41,8 +46,14 @@ export default ({ mainWindow }: { mainWindow: BrowserWindow }) => {
   initBulkMedia(mainWindow);
   const path = join(app.getPath('userData'), 'account-tools.json');
   const translations = new TranslationQueue();
-  let data: { accounts: Record<string, StoredConfig>; history: SendRecord[] } =
-    { accounts: {}, history: [] };
+  const translationCache = new TranslationCache(
+    join(app.getPath('userData'), 'translation-cache.json'),
+  );
+  let data: {
+    accounts: Record<string, StoredConfig>;
+    history: SendRecord[];
+    bulkPreferences?: BulkPreferences;
+  } = { accounts: {}, history: [] };
   if (existsSync(path)) {
     try {
       data = JSON.parse(readFileSync(path, 'utf8'));
@@ -81,7 +92,10 @@ export default ({ mainWindow }: { mainWindow: BrowserWindow }) => {
         password: undefined,
         hasPassword: Boolean(c.encryptedPassword),
       },
-      translation: c.translation,
+      translation: {
+        ...c.translation,
+        cacheRevision: TranslationCache.key([c.providers, c.encryptedKeys]),
+      },
       providers: Object.fromEntries(
         translationEngines.map(engine => [
           engine,
@@ -98,6 +112,7 @@ export default ({ mainWindow }: { mainWindow: BrowserWindow }) => {
     Awaited<ReturnType<typeof createSocksBridge>>
   >();
   app.on('before-quit', () => {
+    translationCache.flush();
     for (const bridge of bridges.values()) bridge.close();
     bridges.clear();
   });
@@ -176,6 +191,7 @@ export default ({ mainWindow }: { mainWindow: BrowserWindow }) => {
   };
   ipcMain.handle('account-tools-remove', async (event, id: string) => {
     check(event, id);
+    translationCache.removeAccount(id);
     data.accounts = Object.fromEntries(
       Object.entries(data.accounts).filter(([key]) => key !== id),
     );
@@ -323,17 +339,34 @@ export default ({ mainWindow }: { mainWindow: BrowserWindow }) => {
         throw new Error('翻译内容为空或超过 12000 字符');
       const t = get(id).translation;
       if (!t[direction]) throw new Error('当前账号未启用此方向翻译');
+      const engine = direction === 'incoming' ? t.receiveEngine : t.engine;
+      const savedConfig = get(id);
+      const key = TranslationCache.key([
+        id,
+        engine,
+        direction === 'incoming' ? t.receiveSource : t.source,
+        direction === 'incoming' ? t.receiveTarget : t.sendTarget,
+        savedConfig.providers?.[engine]?.model,
+        savedConfig.encryptedKeys?.[engine],
+        text,
+      ]);
+      const cached = translationCache.get(key);
+      if (cached !== undefined) return { text: cached, error: false };
       return translations.enqueue(id, direction === 'outgoing', async () => {
         if (
           JSON.stringify(get(id).translation) !== JSON.stringify(t) ||
-          !get(id).translation[direction]
+          !get(id).translation[direction] ||
+          JSON.stringify([get(id).providers, get(id).encryptedKeys]) !==
+            JSON.stringify([savedConfig.providers, savedConfig.encryptedKeys])
         )
           return { text: '', error: true };
         await (prepared.has(id) ? prepared.get(id) : apply(id, get(id)));
         const engine = direction === 'incoming' ? t.receiveEngine : t.engine;
         const config = get(id);
         const s = session.fromPartition(`persist:service-${id}`);
-        return translateAccount(
+        const repeated = translationCache.get(key);
+        if (repeated !== undefined) return { text: repeated, error: false };
+        const result = await translateAccount(
           accountTransport(s, config.proxy, () =>
             decrypt(config.encryptedPassword),
           ),
@@ -344,6 +377,9 @@ export default ({ mainWindow }: { mainWindow: BrowserWindow }) => {
           decrypt(config.encryptedKeys?.[engine]),
           config.providers?.[engine]?.model,
         );
+        if (!result.error && data.accounts[id])
+          translationCache.set(id, key, result.text);
+        return result;
       });
     },
   );
@@ -371,6 +407,23 @@ export default ({ mainWindow }: { mainWindow: BrowserWindow }) => {
           config.providers?.[engine]?.model,
         ),
       );
+    },
+  );
+  ipcMain.handle(
+    'account-tools-bulk-preferences',
+    (event, input?: BulkPreferences) => {
+      check(event);
+      if (input !== undefined) {
+        const previous = data.bulkPreferences;
+        data.bulkPreferences = normalizeBulkPreferences(input);
+        try {
+          save();
+        } catch (error) {
+          data.bulkPreferences = previous;
+          throw error;
+        }
+      }
+      return normalizeBulkPreferences(data.bulkPreferences);
     },
   );
   ipcMain.handle('account-tools-history-delete', (event, ids: string[]) => {

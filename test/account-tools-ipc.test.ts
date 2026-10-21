@@ -73,6 +73,61 @@ describe('privileged account tools IPC', () => {
     jest.dontMock('../src/electron/accountTranslation');
     rmSync(root, { recursive: true, force: true });
   });
+  it('persists and restores bulk settings without storing recipients, content or an old scheduled date', () => {
+    const saved = invoke('bulk-preferences', {
+      type: 'video',
+      scheduled: true,
+      randomInterval: true,
+      intervalMin: 4.5,
+      intervalMax: 8,
+      typingSeconds: 3,
+      mentionAll: true,
+      failure: 'continue',
+      kind: 'group',
+      text: 'must not persist',
+      targets: ['private'],
+      scheduledAt: '2026-10-21',
+    });
+    require('../src/electron/ipc-api/accountTools').default({ mainWindow });
+    expect(invoke('bulk-preferences')).toEqual(saved);
+    const raw = readFileSync(join(root, 'account-tools.json'), 'utf8');
+    expect(raw).not.toContain('must not persist');
+    expect(raw).not.toContain('scheduledAt');
+    expect(
+      invoke('bulk-preferences', {
+        intervalMin: -2,
+        typingSeconds: 100,
+        failure: 'bad',
+      }),
+    ).toMatchObject({ intervalMin: 1.5, typingSeconds: 0, failure: 'stop' });
+    event.senderFrame = {};
+    expect(() => invoke('bulk-preferences')).toThrow('禁止');
+  });
+  it('reuses translations across preview toggles and reloads, with separate account and target caches', async () => {
+    const config = defaultTools();
+    config.translation.incoming = true;
+    await invoke('save', 'account-1', config);
+    const translate =
+      require('../src/electron/accountTranslation').translateAccount;
+    await invoke('translate', 'account-1', 'cache source', 'incoming');
+    await invoke('translate', 'account-1', 'cache source', 'incoming');
+    expect(translate).toHaveBeenCalledTimes(1);
+    config.translation.preview = true;
+    await invoke('save', 'account-1', config);
+    await invoke('translate', 'account-1', 'cache source', 'incoming');
+    expect(translate).toHaveBeenCalledTimes(1);
+    beforeQuit();
+    require('../src/electron/ipc-api/accountTools').default({ mainWindow });
+    await invoke('translate', 'account-1', 'cache source', 'incoming');
+    expect(translate).toHaveBeenCalledTimes(1);
+    config.translation.receiveTarget = 'en';
+    await invoke('save', 'account-1', config);
+    await invoke('translate', 'account-1', 'cache source', 'incoming');
+    expect(translate).toHaveBeenCalledTimes(2);
+    await invoke('save', 'account-2', config);
+    await invoke('translate', 'account-2', 'cache source', 'incoming');
+    expect(translate).toHaveBeenCalledTimes(3);
+  });
   it('deleting selected local history preserves other records and account settings', async () => {
     await invoke('save', 'account-1', defaultTools());
     const record = {
