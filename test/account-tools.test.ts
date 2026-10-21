@@ -141,7 +141,13 @@ describe('WhatsApp recipient/send adapter (synthetic modules, no real messages)'
   });
   it('lists only writable groups/private chats actually loaded in this account', () => {
     expect(listRecipients()).toEqual([
-      { id: '123@g.us', name: 'Test group', group: true },
+      {
+        id: '123@g.us',
+        name: 'Test group',
+        group: true,
+        archived: false,
+        contact: false,
+      },
     ]);
     chat.isReadOnly = true;
     expect(listRecipients()).toEqual([]);

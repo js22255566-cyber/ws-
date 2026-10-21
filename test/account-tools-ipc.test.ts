@@ -73,6 +73,31 @@ describe('privileged account tools IPC', () => {
     jest.dontMock('../src/electron/accountTranslation');
     rmSync(root, { recursive: true, force: true });
   });
+  it('deleting selected local history preserves other records and account settings', async () => {
+    await invoke('save', 'account-1', defaultTools());
+    const record = {
+      id: 'one',
+      started: new Date().toISOString(),
+      text: 'test',
+      status: '已完成',
+      total: 1,
+      success: 1,
+      failed: 0,
+      details: [],
+    };
+    invoke('history', record);
+    invoke('history', { ...record, id: 'two' });
+    expect(invoke('history-delete', ['one'])).toEqual([
+      { ...record, id: 'two' },
+    ]);
+    expect(
+      JSON.parse(readFileSync(join(root, 'account-tools.json'), 'utf8'))
+        .accounts['account-1'],
+    ).toBeDefined();
+    expect(() => invoke('history-delete', 'all')).toThrow('无效');
+    event.senderFrame = {};
+    expect(() => invoke('history-delete', ['two'])).toThrow('禁止');
+  });
   it('rejects webview/subframe IPC access and path-like identifiers', () => {
     event.sender = {};
     expect(() => invoke('get', 'account-1')).toThrow('禁止');

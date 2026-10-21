@@ -20,6 +20,7 @@ import { translateAccount } from '../accountTranslation';
 import { createSocksBridge } from '../socksProxy';
 import { accountTransport } from '../accountTransport';
 import TranslationQueue from '../../features/accountTools/TranslationQueue';
+import initBulkMedia from './bulkMedia';
 
 type StoredConfig = ToolsConfig & {
   encryptedPassword?: string;
@@ -37,6 +38,7 @@ const encrypt = (value: string) => {
   return safeStorage.encryptString(value).toString('base64');
 };
 export default ({ mainWindow }: { mainWindow: BrowserWindow }) => {
+  initBulkMedia(mainWindow);
   const path = join(app.getPath('userData'), 'account-tools.json');
   const translations = new TranslationQueue();
   let data: { accounts: Record<string, StoredConfig>; history: SendRecord[] } =
@@ -371,6 +373,24 @@ export default ({ mainWindow }: { mainWindow: BrowserWindow }) => {
       );
     },
   );
+  ipcMain.handle('account-tools-history-delete', (event, ids: string[]) => {
+    check(event);
+    if (
+      !Array.isArray(ids) ||
+      ids.length > 100 ||
+      ids.some(id => typeof id !== 'string' || id.length > 100)
+    )
+      throw new Error('无效记录编号');
+    const previous = data.history;
+    data.history = previous.filter(r => !ids.includes(r.id));
+    try {
+      save();
+    } catch (error) {
+      data.history = previous;
+      throw error;
+    }
+    return data.history;
+  });
   ipcMain.handle('account-tools-history', (event, record?: SendRecord) => {
     check(event);
     if (record) {

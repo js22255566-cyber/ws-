@@ -66,6 +66,18 @@ const copyManualAssets = () => {
   }
   fs.copyFileSync('package.json', `${outDir}/package.json`);
   fs.copyFileSync('electron-builder.npmrc', `${outDir}/.npmrc`);
+  fs.copyFileSync(
+    'node_modules/@wppconnect/wa-js/dist/wppconnect-wa.js',
+    `${outDir}/wppconnect-wa.js`,
+  );
+  fs.copyFileSync(
+    'node_modules/@wppconnect/wa-js/dist/wppconnect-wa.js.LICENSE.txt',
+    `${outDir}/wppconnect-wa.js.LICENSE.txt`,
+  );
+  fs.copyFileSync(
+    'node_modules/@wppconnect/wa-js/LICENSE',
+    `${outDir}/WA-JS-LICENSE`,
+  );
 
   const buildInfoData = {
     timestamp: buildInfo.timestamp,
@@ -94,6 +106,7 @@ const runEsbuild = async () => {
   const guestEntries = [
     'src/features/accounts/whatsapp.ts',
     'src/features/accountTools/guest.ts',
+    'src/features/accountTools/bulkGuest.ts',
   ];
   const sourceEntries = await glob('./src/**/*.{ts,tsx,js,jsx}');
   const entryPoints = sourceEntries.filter(

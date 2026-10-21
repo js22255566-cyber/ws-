@@ -1,0 +1,485 @@
+import { useState } from 'react';
+import {
+  Button,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+} from '@mui/material';
+import type { SendRecord } from './config';
+
+const time = (value?: string) =>
+  value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '—';
+
+export default function BulkHistory({
+  records,
+  running,
+  onCompose,
+  onDelete,
+  onStop,
+  onRevoke,
+}: {
+  records: SendRecord[];
+  running: boolean;
+  onCompose: (record: SendRecord) => void;
+  onStop: (id: string) => Promise<void>;
+  onRevoke: (id: string, targets?: string[]) => Promise<void>;
+  onDelete: (ids: string[]) => Promise<void>;
+}) {
+  const empty = { text: '', status: 'all', from: '', to: '' };
+  const [draft, setDraft] = useState(empty);
+  const [filters, setFilters] = useState(empty);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+  const [detailId, setDetailId] = useState('');
+  const detail = records.find(r => r.id === detailId);
+  const [tab, setTab] = useState('send');
+  const [revoking, setRevoking] = useState<SendRecord>();
+  const [revokeTargets, setRevokeTargets] = useState<string[]>([]);
+  const [deleting, setDeleting] = useState<string[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const status = (r: SendRecord) =>
+    r.status === '发送中' && !running ? '已中断' : r.status;
+  const filtered = records.filter(r => {
+    if (
+      tab === 'revoke' &&
+      !r.deliveries?.some(d => d.revoked || d.revokeError)
+    )
+      return false;
+    const date = new Date(
+      tab === 'revoke' ? (r.revokeStarted ?? r.started) : r.started,
+    );
+    const localDate = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+    return (
+      r.text.toLowerCase().includes(filters.text.trim().toLowerCase()) &&
+      (filters.status === 'all' || status(r) === filters.status) &&
+      (!filters.from || localDate >= filters.from) &&
+      (!filters.to || localDate <= filters.to)
+    );
+  });
+  const pages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const current = Math.min(page, pages);
+  return (
+    <div className="bulk-history">
+      <div className="bulk-type-tabs" role="group" aria-label="记录类型">
+        <button
+          type="button"
+          aria-pressed={tab === 'send'}
+          onClick={() => {
+            setTab('send');
+            setPage(1);
+          }}
+        >
+          发送记录
+        </button>
+        <button
+          type="button"
+          aria-pressed={tab === 'revoke'}
+          onClick={() => {
+            setTab('revoke');
+            setPage(1);
+          }}
+        >
+          撤回记录
+        </button>
+      </div>
+      <form
+        className="bulk-history__filters"
+        onSubmit={e => {
+          e.preventDefault();
+          setFilters(draft);
+          setPage(1);
+        }}
+      >
+        <input
+          aria-label="搜索消息内容"
+          placeholder="搜索消息内容"
+          value={draft.text}
+          onChange={e => setDraft({ ...draft, text: e.target.value })}
+        />
+        <select
+          aria-label="筛选发送状态"
+          value={draft.status}
+          onChange={e => setDraft({ ...draft, status: e.target.value })}
+        >
+          <option value="all">全部状态</option>
+          {[
+            '待发送',
+            '发送中',
+            '已完成',
+            '部分失败',
+            '已停止',
+            '已中断',
+            '已取消',
+            '已错过',
+          ].map(s => (
+            <option key={s}>{s}</option>
+          ))}
+        </select>
+        <input
+          aria-label="开始日期"
+          type="date"
+          value={draft.from}
+          max={draft.to || undefined}
+          onChange={e => setDraft({ ...draft, from: e.target.value })}
+        />
+        <span>至</span>
+        <input
+          aria-label="结束日期"
+          type="date"
+          value={draft.to}
+          min={draft.from || undefined}
+          onChange={e => setDraft({ ...draft, to: e.target.value })}
+        />
+        <Button type="submit" variant="contained">
+          搜索
+        </Button>
+        <Button
+          onClick={() => {
+            setDraft(empty);
+            setFilters(empty);
+            setPage(1);
+          }}
+        >
+          重置
+        </Button>
+        <Button
+          color="error"
+          disabled={running || records.length === 0}
+          onClick={() => setDeleting(records.map(r => r.id))}
+        >
+          清空记录
+        </Button>
+      </form>
+      <div className="bulk-history__table">
+        <table>
+          <thead>
+            <tr>
+              {[
+                '发送内容',
+                '状态',
+                '发送方式',
+                tab === 'revoke' ? '撤回进度' : '发送进度',
+                '消息发送策略',
+                tab === 'revoke' ? '撤回时间' : '发送时间',
+                '结束时间',
+                '操作',
+              ].map(h => (
+                <th key={h}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {filtered
+              .slice((current - 1) * pageSize, current * pageSize)
+              .map(r => (
+                <tr key={r.id}>
+                  <td>
+                    <div className="bulk-history__text" title={r.text}>
+                      {r.text}
+                    </div>
+                  </td>
+                  <td>
+                    <span
+                      className={`bulk-status${status(r) === '已完成' ? ' bulk-status--complete' : ''}`}
+                    >
+                      {tab === 'revoke'
+                        ? r.deliveries?.every(d => !d.messageId || d.revoked)
+                          ? '已撤回'
+                          : '部分撤回或失败'
+                        : status(r)}
+                    </span>
+                  </td>
+                  <td>
+                    {r.spec?.scheduledAt ? (
+                      <>
+                        定时发送<small>{time(r.spec.scheduledAt)}</small>
+                      </>
+                    ) : (
+                      '立即发送'
+                    )}
+                  </td>
+                  <td>
+                    <progress
+                      aria-label="发送进度"
+                      value={
+                        tab === 'revoke'
+                          ? (r.deliveries?.filter(
+                              d => d.revoked || d.revokeError,
+                            ).length ?? 0)
+                          : r.success + r.failed
+                      }
+                      max={Math.max(1, r.total)}
+                    />
+                    <small>
+                      {tab === 'revoke'
+                        ? `已撤回 ${r.deliveries?.filter(d => d.revoked).length ?? 0} · 失败 ${r.deliveries?.filter(d => d.revokeError).length ?? 0}`
+                        : `成功 ${r.success} · 未确认或失败 ${r.failed} · 总计 ${r.total}`}
+                    </small>
+                  </td>
+                  <td>
+                    {r.spec?.failure === 'continue'
+                      ? '跳过失败，继续后续对象'
+                      : '遇到失败即停止'}
+                  </td>
+                  <td>
+                    {time(tab === 'revoke' ? r.revokeStarted : r.started)}
+                  </td>
+                  <td>{time(tab === 'revoke' ? r.revokeEnded : r.ended)}</td>
+                  <td>
+                    <div className="bulk-history__actions">
+                      <Button onClick={() => setDetailId(r.id)}>详情</Button>
+                      <Button disabled={running} onClick={() => onCompose(r)}>
+                        再发一条
+                      </Button>
+                      <details className="bulk-history__more">
+                        <summary>更多</summary>
+                        <div>
+                          {r.status === '待发送' && (
+                            <Button
+                              disabled={running}
+                              onClick={async () => {
+                                try {
+                                  await onStop(r.id);
+                                } catch (error_) {
+                                  setError(String(error_));
+                                }
+                              }}
+                            >
+                              取消定时任务
+                            </Button>
+                          )}
+                          <Button
+                            disabled={
+                              running ||
+                              !r.deliveries?.some(
+                                d => d.messageId && !d.revoked,
+                              )
+                            }
+                            onClick={() => {
+                              setError('');
+                              setRevoking(r);
+                              setRevokeTargets(
+                                (r.deliveries ?? [])
+                                  .filter(d => d.messageId && !d.revoked)
+                                  .map(
+                                    d => `${d.target.accountId}:${d.target.id}`,
+                                  ),
+                              );
+                            }}
+                          >
+                            撤回已发消息
+                          </Button>
+                          <Button
+                            disabled={running || r.status === '待发送'}
+                            onClick={() => setDeleting([r.id])}
+                          >
+                            删除记录
+                          </Button>
+                        </div>
+                      </details>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            {filtered.length === 0 && (
+              <tr>
+                <td colSpan={8} className="bulk-history__empty">
+                  {records.length > 0 ? '没有符合条件的记录' : '暂无发送记录'}
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+      <div className="bulk-history__pagination">
+        <span>共 {filtered.length} 条</span>
+        <Button
+          aria-label="上一页"
+          disabled={current <= 1}
+          onClick={() => setPage(current - 1)}
+        >
+          上一页
+        </Button>
+        <span>
+          {current} / {pages}
+        </span>
+        <Button
+          aria-label="下一页"
+          disabled={current >= pages}
+          onClick={() => setPage(current + 1)}
+        >
+          下一页
+        </Button>
+        <select
+          aria-label="每页条数"
+          value={pageSize}
+          onChange={e => {
+            setPageSize(Number(e.target.value));
+            setPage(1);
+          }}
+        >
+          {[10, 20, 50].map(n => (
+            <option key={n} value={n}>
+              {n} 条/页
+            </option>
+          ))}
+        </select>
+      </div>
+      <Dialog
+        open={Boolean(detail)}
+        className="account-tools-dialog"
+        fullWidth
+        maxWidth="md"
+        onClose={() => setDetailId('')}
+      >
+        <DialogTitle>发送详情</DialogTitle>
+        <DialogContent>
+          <p className="bulk-record-text">{detail?.text}</p>
+          <p>
+            {detail && status(detail)} · 成功 {detail?.success} / 未确认或失败{' '}
+            {detail?.failed} / 共 {detail?.total}
+          </p>
+          {detail?.deliveries?.map(d => (
+            <div
+              className="bulk-delivery"
+              key={`${d.target.accountId}:${d.target.id}`}
+            >
+              <p>
+                {d.target.name} ·{' '}
+                {d.status === 'sent'
+                  ? '服务器已接受'
+                  : d.status === 'sending'
+                    ? '结果未确认'
+                    : '发送失败或未确认'}
+                {d.messageId ? ` · 消息编号 ${d.messageId}` : ''}
+              </p>
+              {d.error && <p>{d.error}</p>}
+              {d.revoked && <p>已撤回 · {time(d.revokedAt)}</p>}
+              {d.revokeError && <p role="alert">撤回失败：{d.revokeError}</p>}
+            </div>
+          ))}
+          {!detail?.deliveries &&
+            [...new Set(detail?.details ?? [])].map(d => <p key={d}>{d}</p>)}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDetailId('')}>关闭详情</Button>
+        </DialogActions>
+      </Dialog>
+      <p role="alert" className="tools-notice">
+        {error}
+      </p>
+      <Dialog
+        open={Boolean(revoking)}
+        className="account-tools-dialog"
+        onClose={() => {
+          if (!busy) setRevoking(undefined);
+        }}
+      >
+        <DialogTitle>撤回已发消息</DialogTitle>
+        <DialogContent>
+          将尝试对所有人撤回这条任务中 {revokeTargets.length}{' '}
+          条已发消息。平台时限或权限可能导致撤回失败，请到「详情」查看逐条结果。
+          <p className="bulk-record-text">{revoking?.text}</p>
+          {revoking?.deliveries
+            ?.filter(d => d.messageId && !d.revoked)
+            .map(d => {
+              const targetKey = `${d.target.accountId}:${d.target.id}`;
+              return (
+                <label
+                  className="tools-check"
+                  htmlFor={`revoke-${targetKey}`}
+                  key={targetKey}
+                >
+                  <input
+                    id={`revoke-${targetKey}`}
+                    type="checkbox"
+                    checked={revokeTargets.includes(targetKey)}
+                    disabled={busy}
+                    onChange={e =>
+                      setRevokeTargets(current =>
+                        e.target.checked
+                          ? [...current, targetKey]
+                          : current.filter(id => id !== targetKey),
+                      )
+                    }
+                  />
+                  <span>
+                    {d.target.name}
+                    <small>{d.target.id}</small>
+                  </span>
+                </label>
+              );
+            })}
+        </DialogContent>
+        <DialogActions>
+          <Button disabled={busy} onClick={() => setRevoking(undefined)}>
+            取消
+          </Button>
+          <Button
+            disabled={busy || running || revokeTargets.length === 0}
+            color="error"
+            onClick={async () => {
+              if (!revoking) return;
+              setBusy(true);
+              try {
+                await onRevoke(revoking.id, revokeTargets);
+                setDetailId(revoking.id);
+                setRevoking(undefined);
+              } catch (error_) {
+                setError(String(error_));
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            确认撤回消息
+          </Button>
+        </DialogActions>
+      </Dialog>
+      <Dialog
+        open={deleting.length > 0}
+        className="account-tools-dialog"
+        onClose={() => {
+          if (!busy) setDeleting([]);
+        }}
+      >
+        <DialogTitle>删除发送记录</DialogTitle>
+        <DialogContent>
+          将删除 {deleting.length} 条本地记录。已发送的 WhatsApp 消息不会撤回。
+          <p role="alert">{error}</p>
+        </DialogContent>
+        <DialogActions>
+          <Button
+            disabled={busy}
+            onClick={() => {
+              setDeleting([]);
+              setError('');
+            }}
+          >
+            取消
+          </Button>
+          <Button
+            disabled={busy || running}
+            color="error"
+            onClick={async () => {
+              setBusy(true);
+              try {
+                await onDelete(deleting);
+                setDeleting([]);
+                setError('');
+              } catch {
+                setError('删除记录失败，请重试');
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            确认删除记录
+          </Button>
+        </DialogActions>
+      </Dialog>
+    </div>
+  );
+}

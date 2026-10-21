@@ -15,6 +15,8 @@ const {
 } = require('../build/features/accountTools/guest');
 const { defaultTools } = require('../build/features/accountTools/config');
 
+const advanced = require('../build/features/accountTools/bulkGuest');
+
 (async () => {
   const modules = {
     WAWebSocketModel: { Socket: { state: 'CONNECTED' } },
@@ -56,6 +58,31 @@ const { defaultTools } = require('../build/features/accountTools/config');
     call(sendTextToChat, ['unknown@c.us', 'test']),
     /聊天不可用/,
   );
+
+  context.window.WPP = {
+    isReady: true,
+    chat: {
+      get: () => ({}),
+      sendTextMessage: async () => ({ id: 'synthetic-message', ack: 1 }),
+      getMessageById: async () => ({
+        id: { fromMe: true, remote: { _serialized: 'synthetic@g.us' } },
+      }),
+      deleteMessage: async () => ({ isRevoked: true, sendMsgResult: 'OK' }),
+    },
+    contact: { list: async () => [] },
+  };
+  const sent = await call(advanced.sendBulkMessage, [
+    'synthetic@g.us',
+    { type: 'text', text: 'fixture', typingSeconds: 0, mentionAll: false },
+  ]);
+  assert.equal(sent.messageId, 'synthetic-message');
+  assert.equal(sent.confirmed, true);
+  await call(advanced.revokeBulkMessage, [
+    'synthetic@g.us',
+    'synthetic-message',
+  ]);
+  const contacts = await call(advanced.listBulkContacts);
+  assert.equal(contacts.length, 0);
   console.log(
     'PASS compiled guest functions execute independently of their host module',
   );

@@ -2,6 +2,7 @@
 /* eslint-disable @typescript-eslint/no-loop-func -- stopped is intentionally shared by pending jobs on cleanup. */
 import { ipcRenderer } from 'electron';
 import type { RealStores } from '../../stores';
+import { getBulkQueue } from './bulkRuntime';
 import { type ToolsConfig } from './config';
 import {
   translationTick,
@@ -33,6 +34,8 @@ export async function configureTranslation(
     );
 }
 export function startTranslations(stores: RealStores): () => void {
+  const bulk = getBulkQueue(stores);
+  bulk.start();
   let stopped = false;
   const running = new Set<string>();
   const pending = new Set<string>();
@@ -158,6 +161,7 @@ export function startTranslations(stores: RealStores): () => void {
   }, 400);
   return () => {
     stopped = true;
+    bulk.dispose();
     clearInterval(timer);
     configs.clear();
     cache.clear();

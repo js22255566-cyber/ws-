@@ -1,0 +1,213 @@
+import BulkQueue, {
+  validateBulkSpec,
+  type BulkAdapter,
+} from '../src/features/accountTools/BulkQueue';
+import type { BulkSpec, SendRecord } from '../src/features/accountTools/config';
+
+const spec = (extra: Partial<BulkSpec> = {}): BulkSpec => ({
+  type: 'text',
+  text: 'hello',
+  targets: [
+    { id: 'one@g.us', accountId: 'account-1', name: 'group', group: true },
+    { id: 'two@c.us', accountId: 'account-2', name: 'private', group: false },
+  ],
+  intervalMin: 0.5,
+  intervalMax: 0.5,
+  typingSeconds: 0,
+  mentionAll: false,
+  failure: 'stop',
+  ...extra,
+});
+const saved = (extra: Partial<SendRecord> = {}): SendRecord => ({
+  id: 'saved',
+  started: new Date().toISOString(),
+  text: 'hello',
+  total: 2,
+  success: 0,
+  failed: 0,
+  details: [],
+  spec: spec(),
+  ...extra,
+  status: extra.status || '待发送',
+});
+
+const finish = async (action: Promise<unknown>) => {
+  await jest.runAllTimersAsync();
+  await action;
+};
+
+describe('persistent bulk queue without live WhatsApp', () => {
+  let adapter: BulkAdapter;
+  let queue: BulkQueue;
+  beforeEach(() => {
+    jest.useFakeTimers();
+    adapter = {
+      load: jest.fn().mockResolvedValue([]),
+      save: jest.fn().mockImplementation(async () => {}),
+      remove: jest.fn().mockResolvedValue([]),
+      send: jest.fn().mockImplementation(async target => `sent-${target.id}`),
+      revoke: jest.fn().mockImplementation(async () => {}),
+    };
+    queue = new BulkQueue(adapter);
+  });
+  afterEach(() => {
+    queue.dispose();
+    jest.useRealTimers();
+  });
+  it('persists each checkpoint and message ID before proceeding, without duplicate sends', async () => {
+    const action = queue.submit(spec());
+    await finish(action);
+    expect(adapter.send).toHaveBeenCalledTimes(2);
+    expect(queue.records[0]).toMatchObject({
+      status: '已完成',
+      success: 2,
+      failed: 0,
+      deliveries: [
+        { messageId: 'sent-one@g.us' },
+        { messageId: 'sent-two@c.us' },
+      ],
+    });
+    expect(
+      (adapter.save as jest.Mock).mock.invocationCallOrder[0],
+    ).toBeLessThan((adapter.send as jest.Mock).mock.invocationCallOrder[0]);
+    await queue.tick();
+    expect(adapter.send).toHaveBeenCalledTimes(2);
+  });
+  it('a history write failure prevents any send', async () => {
+    (adapter.save as jest.Mock).mockRejectedValue(new Error('disk full'));
+    await expect(queue.submit(spec())).rejects.toThrow('disk full');
+    expect(adapter.send).not.toHaveBeenCalled();
+  });
+  it('continues only to the next recipient when the user selects skip failure', async () => {
+    (adapter.send as jest.Mock).mockRejectedValueOnce(new Error('rejected'));
+    await finish(queue.submit(spec({ failure: 'continue' })));
+    expect(adapter.send).toHaveBeenCalledTimes(2);
+    expect(queue.records[0]).toMatchObject({
+      status: '部分失败',
+      success: 1,
+      failed: 1,
+    });
+  });
+  it('default failure stops the queue and never retries the failed message', async () => {
+    (adapter.send as jest.Mock).mockRejectedValue(new Error('rejected'));
+    await finish(queue.submit(spec()));
+    expect(adapter.send).toHaveBeenCalledTimes(1);
+    expect(queue.records[0].status).toBe('已停止');
+  });
+  it('an unknown timeout stops even when skip failure is selected', async () => {
+    (adapter.send as jest.Mock).mockImplementation(() => new Promise(() => {}));
+    await finish(queue.submit(spec({ failure: 'continue' })));
+    expect(adapter.send).toHaveBeenCalledTimes(1);
+    expect(queue.records[0]).toMatchObject({
+      status: '已停止',
+      deliveries: [{ status: 'uncertain' }],
+    });
+  });
+  it('stopping during a send waits for that send and skips remaining recipients', async () => {
+    let resolve!: (id: string) => void;
+    (adapter.send as jest.Mock).mockImplementation(
+      () =>
+        new Promise(r => {
+          resolve = r;
+        }),
+    );
+    const action = queue.submit(spec());
+    await jest.advanceTimersByTimeAsync(1);
+    await queue.stop(queue.activeId);
+    resolve('accepted');
+    await finish(action);
+    expect(adapter.send).toHaveBeenCalledTimes(1);
+    expect(queue.records[0]).toMatchObject({ status: '已停止', success: 1 });
+  });
+  it('executes scheduled tasks only when due and allows cancel before due', async () => {
+    await queue.submit(
+      spec({ scheduledAt: new Date(Date.now() + 10_000).toISOString() }),
+    );
+    await queue.tick();
+    expect(adapter.send).not.toHaveBeenCalled();
+    await jest.advanceTimersByTimeAsync(10_000);
+    await finish(queue.tick());
+    expect(adapter.send).toHaveBeenCalledTimes(2);
+    await queue.submit(
+      spec({ scheduledAt: new Date(Date.now() + 10_000).toISOString() }),
+    );
+    await queue.stop(queue.records[0].id);
+    await jest.advanceTimersByTimeAsync(10_000);
+    await queue.tick();
+    expect(adapter.send).toHaveBeenCalledTimes(2);
+    expect(queue.records[0].status).toBe('已取消');
+  });
+  it('restart never replays interrupted sends or missed scheduled tasks', async () => {
+    (adapter.load as jest.Mock).mockResolvedValue([
+      saved({ id: 'interrupted', status: '发送中' }),
+      saved({
+        id: 'missed',
+        spec: spec({ scheduledAt: new Date(Date.now() - 1000).toISOString() }),
+      }),
+    ]);
+    await queue.load();
+    await queue.tick();
+    expect(new Set(queue.records.map(r => r.status))).toEqual(
+      new Set(['已中断', '已错过']),
+    );
+    expect(adapter.send).not.toHaveBeenCalled();
+  });
+  it('preserves message IDs for revoke, reports failures, and skips already revoked messages', async () => {
+    await finish(queue.submit(spec()));
+    const { id } = queue.records[0];
+    (adapter.revoke as jest.Mock).mockRejectedValueOnce(new Error('expired'));
+    await queue.revoke(id);
+    expect(queue.records[0].deliveries).toMatchObject([
+      { revokeError: 'Error: expired' },
+      { revoked: true },
+    ]);
+    await queue.revoke(id);
+    expect(adapter.revoke).toHaveBeenCalledTimes(3);
+    expect(queue.records[0].deliveries?.every(d => d.revoked)).toBe(true);
+  });
+  it('deleting history never invokes the WhatsApp revoke adapter and protects scheduled tasks', async () => {
+    await queue.submit(
+      spec({ scheduledAt: new Date(Date.now() + 10_000).toISOString() }),
+    );
+    const { id } = queue.records[0];
+    await expect(queue.remove([id])).rejects.toThrow('取消');
+    await queue.stop(id);
+    await queue.remove([id]);
+    expect(adapter.revoke).not.toHaveBeenCalled();
+    expect(adapter.send).not.toHaveBeenCalled();
+  });
+  it('keeps an unconfirmed message ID for manual revoke and stops further sends', async () => {
+    (adapter.send as jest.Mock).mockResolvedValue({
+      messageId: 'known-but-unconfirmed',
+      confirmed: false,
+    });
+    await finish(queue.submit(spec({ failure: 'continue' })));
+    expect(adapter.send).toHaveBeenCalledTimes(1);
+    expect(queue.records[0]).toMatchObject({
+      status: '已停止',
+      failed: 1,
+      deliveries: [{ messageId: 'known-but-unconfirmed', status: 'uncertain' }],
+    });
+  });
+  it('lets the user revoke a selected target without touching other recipients', async () => {
+    await finish(queue.submit(spec()));
+    await queue.revoke(queue.records[0].id, ['account-2:two@c.us']);
+    expect(adapter.revoke).toHaveBeenCalledTimes(1);
+    expect(adapter.revoke).toHaveBeenCalledWith(
+      spec().targets[1],
+      'sent-two@c.us',
+    );
+    expect(queue.records[0].deliveries?.[0].revoked).toBeUndefined();
+  });
+  it('rejects invalid content, intervals, missing media, invalid cards and duplicate targets', () => {
+    for (const item of [
+      spec({ text: '' }),
+      spec({ intervalMin: 0 }),
+      spec({ intervalMax: Number.NaN }),
+      spec({ type: 'image' }),
+      spec({ type: 'contact', contactPhone: 'bad' }),
+      spec({ targets: [spec().targets[0], spec().targets[0]] }),
+    ])
+      expect(() => validateBulkSpec(item)).toThrow();
+  });
+});

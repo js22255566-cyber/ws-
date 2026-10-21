@@ -107,6 +107,50 @@ export interface Recipient {
   name: string;
   group: boolean;
   accountId: string;
+  archived?: boolean;
+  contact?: boolean;
+  contactOnly?: boolean;
+}
+export type BulkMessageType =
+  | 'text'
+  | 'image'
+  | 'caption'
+  | 'video'
+  | 'audio'
+  | 'contact'
+  | 'document';
+export interface BulkMedia {
+  id: string;
+  name: string;
+  mime: string;
+  size: number;
+}
+export interface BulkSpec {
+  type: BulkMessageType;
+  text: string;
+  media?: BulkMedia;
+  contactName?: string;
+  contactPhone?: string;
+  targets: Recipient[];
+  scheduledAt?: string;
+  intervalMin: number;
+  intervalMax: number;
+  typingSeconds: number;
+  mentionAll: boolean;
+  failure: 'stop' | 'continue';
+}
+export interface BulkDelivery {
+  target: Recipient;
+  messageId?: string;
+  status: 'sending' | 'sent' | 'failed' | 'uncertain';
+  error?: string;
+  revoked?: boolean;
+  revokeError?: string;
+  revokedAt?: string;
+}
+export interface BulkSendOutcome {
+  messageId: string;
+  confirmed: boolean;
 }
 export interface SendRecord {
   id: string;
@@ -118,4 +162,8 @@ export interface SendRecord {
   success: number;
   failed: number;
   details: string[];
+  spec?: BulkSpec;
+  deliveries?: BulkDelivery[];
+  revokeStarted?: string;
+  revokeEnded?: string;
 }

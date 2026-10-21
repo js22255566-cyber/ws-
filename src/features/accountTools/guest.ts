@@ -622,6 +622,8 @@ export function listRecipients(): Omit<Recipient, 'accountId'>[] {
         c.formattedTitle || c.name || c.contact?.pushname || c.id.user,
       ),
       group: c.id.server === 'g.us',
+      archived: Boolean(c.archive),
+      contact: Boolean(c.contact?.isMyContact),
     }));
 }
 

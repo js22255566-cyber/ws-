@@ -342,6 +342,9 @@ importers:
       '@typescript-eslint/parser':
         specifier: 7.10.0
         version: 7.10.0(eslint@8.57.0(supports-color@5.5.0))(supports-color@5.5.0)(typescript@5.4.5)
+      '@wppconnect/wa-js':
+        specifier: 4.7.1
+        version: 4.7.1
       all-contributors-cli:
         specifier: 6.26.1
         version: 6.26.1(encoding@0.1.13)
@@ -2047,6 +2050,10 @@ packages:
     resolution: {integrity: sha512-zuVdFrMJiuCDQUMCzQaD6KL28MjnqqN8XnAqiEq9PNm/hCPTSGfrXCOfwj1ow4LFb/tNymJPwsNbVePc1xFqrQ==}
     deprecated: Potential CWE-502 - Update to 1.3.1 or higher
 
+  '@wppconnect/wa-js@4.7.1':
+    resolution: {integrity: sha512-vcA9q0adL6O9ixRM33wa3geKmYEz+CYP0k1t0rwCAxkp5rjl1YLO3hQOwPRfbTwdgMXC1RtaEl0g625v4In/tw==}
+    engines: {whatsapp-web: '>=2.3000.1038792969-alpha'}
+
   '@xmldom/xmldom@0.8.10':
     resolution: {integrity: sha512-2WALfTl4xo2SkGCYRt6rDTFfk9R1czmBvUQy12gK2KuRKIpWEhcbbzy8EZXtz/jkRqHX8bFEc6FC1HjX4TUWYw==}
     engines: {node: '>=10.0.0'}
@@ -2812,6 +2819,7 @@ packages:
   clone-buffer@1.0.0:
     resolution: {integrity: sha512-KLLTJWrvwIP+OPfMn0x2PheDEP20RPUcGXj/ERegTgdmPEZylALQldygiqrPPu8P45uNuPs7ckmReLY6v/iA5g==}
     engines: {node: '>= 0.10'}
+    deprecated: Package no longer supported. Contact Support at https://www.npmjs.com/support for more info.
 
   clone-deep@0.3.0:
     resolution: {integrity: sha512-qp1do6NplYZZcLU+TQ93+A735g1kNcnH75QbC1olpKJphe36CqkjFEK0PyFSoZlI3/1jO5KnDg64xdwWiEH/zA==}
@@ -9990,6 +9998,8 @@ snapshots:
       eslint-visitor-keys: 3.4.3
 
   '@ungap/structured-clone@1.2.0': {}
+
+  '@wppconnect/wa-js@4.7.1': {}
 
   '@xmldom/xmldom@0.8.10': {}
 

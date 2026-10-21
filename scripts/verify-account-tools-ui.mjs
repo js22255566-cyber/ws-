@@ -681,7 +681,7 @@ try {
   );
   await clickText('确认发送');
   await wait(
-    `document.querySelector('.bulk-history')?.textContent.includes('已完成')`,
+    `document.querySelector('.bulk-history tbody tr:first-child')?.textContent.includes('已完成') && ${service(first)}.webview.executeJavaScript('fixture.bulk.length').then(n=>n===2)`,
     'bulk complete',
   );
   assert.deepEqual(await guest(first, 'fixture.bulk'), [
@@ -709,7 +709,7 @@ try {
   await clickText('检查并发送');
   await clickText('确认发送');
   await wait(
-    `!!document.querySelector('.bulk-history') && document.querySelector('.bulk-history article')?.textContent.includes('已停止')`,
+    `!!document.querySelector('.bulk-history') && document.querySelector('.bulk-history tbody tr')?.textContent.includes('已停止')`,
     'bulk stops on failure',
   );
   assert.equal(await guest(first, 'fixture.bulk.length'), 4);
@@ -731,13 +731,93 @@ try {
   );
   await clickText('停止发送');
   await wait(
-    `!!document.querySelector('.bulk-history') && document.querySelector('.bulk-history article')?.textContent.includes('已停止')`,
+    `!!document.querySelector('.bulk-history') && document.querySelector('.bulk-history tbody tr')?.textContent.includes('已停止')`,
     'queue cancelled',
   );
   assert.equal(await guest(first, 'fixture.bulk.length'), 5);
   assert.equal(await guest(second, 'fixture.bulk.length'), 1);
   console.log(
     'PASS stop button prevents subsequent recipients after the current send',
+  );
+
+  // Media + revoke exercise the privileged file picker, isolated guest adapter and live history UI.
+  await guest(
+    first,
+    `fixture.advanced=[];fixture.revoked=[];window.WPP={isReady:true,chat:{get:()=>({}),sendFileMessage:async(id,data,options)=>{const messageId='fixture-media-'+crypto.randomUUID();fixture.advanced.push({id,dataPrefix:data.slice(0,30),options,messageId});return {id:messageId,ack:1}},getMessageById:async()=>({id:{fromMe:true,remote:{_serialized:'10001@g.us'}}}),deleteMessage:async(chat,id,local,revoke)=>{fixture.revoked.push({chat,id,local,revoke});return {isRevoked:true,sendMsgResult:'OK'}}}};true`,
+  );
+  const mediaPath = `${tlsDirectory}/fixture.png`;
+  writeFileSync(
+    mediaPath,
+    Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==',
+      'base64',
+    ),
+  );
+  await vm(
+    `globalThis.__zlOriginalFilePicker=process.getBuiltinModule('module').createRequire(process.cwd()+'/package.json')('electron').dialog.showOpenDialog;process.getBuiltinModule('module').createRequire(process.cwd()+'/package.json')('electron').dialog.showOpenDialog=async()=>({canceled:false,filePaths:[${JSON.stringify(mediaPath)}]});true`,
+  );
+  await clickText('新建转发');
+  await evaluate(
+    `document.querySelectorAll('.bulk-columns fieldset:first-child input[type="checkbox"]')[1].click()`,
+  );
+  await clickText('读取聊天对象');
+  await wait(
+    `document.querySelectorAll('.bulk-recipient-list input').length===2`,
+    'media target list',
+  );
+  await evaluate(
+    `document.querySelector('.bulk-recipient-list input').click()`,
+  );
+  await clickText('图片');
+  await clickText('选择图片附件');
+  await wait(
+    `document.querySelector('.bulk-media')?.textContent.includes('fixture.png')`,
+    'native picked and copied image',
+  );
+  await clickText('检查并发送');
+  await clickText('确认发送');
+  await wait(
+    `${service(first)}.webview.executeJavaScript('fixture.advanced.length').then(n=>n===1)`,
+    'one media send',
+  );
+  await wait(
+    `document.querySelector('.bulk-history tbody tr:first-child')?.textContent.includes('已完成')`,
+    'media accepted',
+  );
+  await evaluate(
+    `document.querySelector('.bulk-history tbody tr:first-child summary').click()`,
+  );
+  await clickText('撤回已发消息');
+  await clickText('确认撤回消息');
+  await wait(
+    `document.querySelectorAll('[role="dialog"]')[1]?.textContent.includes('已撤回')`,
+    'revoke detail result',
+  );
+  assert.deepEqual(
+    await guest(
+      first,
+      'fixture.revoked.map(r=>({chat:r.chat,local:r.local,revoke:r.revoke}))',
+    ),
+    [{ chat: '10001@g.us', local: false, revoke: true }],
+  );
+  await clickText('关闭详情');
+  await clickText('撤回记录');
+  await wait(
+    `document.querySelector('.bulk-history tbody tr:first-child')?.textContent.includes('已撤回')`,
+    'revoke history table',
+  );
+  await shot('/workspace/ZL-WA-bulk-revoke.png');
+  await clickText('发送记录');
+  assert.equal(
+    await guest(first, 'fixture.advanced.length'),
+    1,
+    'revoke and record navigation never resend media',
+  );
+  await vm(
+    `process.getBuiltinModule('module').createRequire(process.cwd()+'/package.json')('electron').dialog.showOpenDialog=globalThis.__zlOriginalFilePicker;delete globalThis.__zlOriginalFilePicker;true`,
+  );
+  console.log(
+    'PASS native attachment picker copies media, media adapter records its message ID, revoke requests delete-for-everyone and updates revoke history',
   );
 
   await clickText('关闭');
@@ -766,6 +846,13 @@ try {
     } catch {
       /* Keep diagnostic failure visible. */
     }
+  }
+  try {
+    await vm(
+      `if(globalThis.__zlOriginalFilePicker){process.getBuiltinModule('module').createRequire(process.cwd()+'/package.json')('electron').dialog.showOpenDialog=globalThis.__zlOriginalFilePicker;delete globalThis.__zlOriginalFilePicker;}true`,
+    );
+  } catch {
+    /* App may have closed. */
   }
   if (mainPatched)
     try {
