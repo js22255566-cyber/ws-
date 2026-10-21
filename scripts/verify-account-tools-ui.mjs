@@ -344,6 +344,63 @@ try {
     'PASS actual Electron account Session proxy routing and disable-to-DIRECT isolation',
   );
   await clickText('☷群发');
+  const checkBulkLayout = async () => {
+    for (const [width, height] of [
+      [1920, 1080],
+      [1366, 768],
+      [900, 650],
+      [640, 480],
+    ]) {
+      await evaluate(
+        `require('@electron/remote').getCurrentWindow().setSize(${width},${height})`,
+      );
+      await new Promise(resolve => {
+        setTimeout(resolve, 150);
+      });
+      const layout = await evaluate(`(()=>{
+        const paper=document.querySelector('.bulk-dialog > .MuiDialog-container > .MuiPaper-root');
+        const content=paper.querySelector(':scope > .MuiDialogContent-root');
+        const actions=paper.querySelector(':scope > .MuiDialogActions-root');
+        const r=paper.getBoundingClientRect();const footer=actions.getBoundingClientRect();
+        const fixture=document.createElement('div');fixture.style.height='2000px';content.append(fixture);content.scrollTop=content.scrollHeight;
+        const button=actions.querySelector('button');const b=button.getBoundingClientRect();
+        const hit=document.elementFromPoint(b.x+b.width/2,b.y+b.height/2);
+        const result={width:innerWidth,height:innerHeight,paper:r.toJSON(),footer:footer.toJSON(),scrolls:content.scrollHeight>content.clientHeight,footerClickable:button.contains(hit),noHorizontalOverflow:content.scrollWidth<=content.clientWidth+1};
+        fixture.remove();content.scrollTop=0;return result;
+      })()`);
+      assert(
+        layout.paper.top >= 0 && layout.paper.bottom <= layout.height,
+        'forwarding dialog fits vertically',
+      );
+      assert(
+        layout.paper.left >= 0 && layout.paper.right <= layout.width,
+        'forwarding dialog fits horizontally',
+      );
+      assert(
+        layout.paper.height >= layout.height - 40,
+        'forwarding dialog uses the WhatsApp page height',
+      );
+      assert(
+        layout.paper.width >= layout.width - 40,
+        'forwarding dialog covers the WhatsApp page width',
+      );
+      assert(
+        layout.footer.bottom <= layout.height && layout.footerClickable,
+        'footer stays visible and clickable above the guest',
+      );
+      assert(
+        layout.scrolls && layout.noHorizontalOverflow,
+        'body scrolls without hiding footer or overflowing horizontally',
+      );
+    }
+    await evaluate(
+      `require('@electron/remote').getCurrentWindow().setSize(1280,800)`,
+    );
+    await new Promise(resolve => {
+      setTimeout(resolve, 150);
+    });
+  };
+  await checkBulkLayout();
   await clickText('新建转发');
   await wait(`!!document.querySelector('.bulk-columns')`, 'centered bulk form');
   await evaluate(
@@ -357,6 +414,10 @@ try {
   await evaluate(
     `document.querySelector('.bulk-columns fieldset:nth-child(2) > label input').click();const t=document.querySelector('[aria-label="发送内容"]');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(t,'这是批量发送本地测试');t.dispatchEvent(new Event('input',{bubbles:true}));`,
   );
+  await checkBulkLayout();
+  console.log(
+    'PASS forwarding history and creation overlay the guest at four window sizes, with scrolling body and clickable fixed footer',
+  );
   await shot('/workspace/ZL-WA-bulk-send.png');
   assert.equal(
     await guest(first, 'fixture.bulk.length'),
@@ -368,6 +429,12 @@ try {
     await guest(first, 'fixture.bulk.length'),
     0,
     'preview confirmation must not send',
+  );
+  assert(
+    await evaluate(
+      `(()=>{const buttons=[...document.querySelectorAll('[role="dialog"] button')];const button=buttons.find(b=>b.textContent.trim()==='确认发送');const r=button.getBoundingClientRect();return r.top>=0 && r.bottom<=innerHeight && button.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2))})()`,
+    ),
+    'confirmation stays above the forwarding overlay',
   );
   await clickText('确认发送');
   await wait(

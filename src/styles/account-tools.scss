@@ -201,10 +201,55 @@
     overflow-y: auto;
   }
 }
+// The portal covers the guest webview, independent of either sidebar's width.
+// Keep header/actions outside the scrolling content, even on short displays.
 .bulk-dialog > .MuiDialog-container > .MuiPaper-root {
-  min-height: 440px;
-  max-height: 90vh;
+  width: calc(100% - 32px);
+  max-width: none;
+  height: calc(100% - 32px);
+  max-height: none;
+  min-height: 0;
+  margin: 16px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 10px;
+
+  > .MuiDialogTitle-root,
+  > .MuiDialogActions-root {
+    flex: 0 0 auto;
+    background: #15181e;
+  }
+  > .MuiDialogTitle-root {
+    padding: 16px 24px;
+    border-bottom: 1px solid #30353f;
+  }
+  > .MuiDialogContent-root {
+    flex: 1 1 0;
+    min-height: 0;
+    padding: 16px 24px;
+    overflow: auto;
+  }
+  > .MuiDialogActions-root {
+    padding: 12px 24px;
+    border-top: 1px solid #30353f;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
 }
+.bulk-dialog__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.bulk-dialog__heading {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
 .bulk-columns {
   display: grid;
   grid-template-columns: 1fr 1.5fr 1.2fr;
@@ -217,7 +262,7 @@
   }
 }
 .bulk-recipient-list {
-  max-height: 350px;
+  max-height: min(52vh, 560px);
   overflow-y: auto;
 }
 .bulk-history article {
@@ -270,4 +315,24 @@
 .account-tools-dialog .MuiButton-contained {
   background: #0654df;
   color: white;
+}
+
+@media (max-width: 760px) {
+  .bulk-dialog > .MuiDialog-container > .MuiPaper-root {
+    width: calc(100% - 16px);
+    height: calc(100% - 16px);
+    margin: 8px;
+
+    > .MuiDialogTitle-root,
+    > .MuiDialogContent-root,
+    > .MuiDialogActions-root {
+      padding: 12px 16px;
+    }
+  }
+  .bulk-columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .bulk-columns fieldset:last-child {
+    grid-column: auto;
+  }
 }

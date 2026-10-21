@@ -179,18 +179,27 @@ const BulkSend = observer(
     return (
       <Dialog
         open
-        maxWidth="xl"
+        maxWidth={false}
         fullWidth
+        scroll="paper"
+        aria-labelledby="bulk-dialog-title"
         className="account-tools-dialog bulk-dialog"
         onClose={() => {
           if (!running) onClose();
         }}
       >
-        <DialogTitle>
-          批量发送{' '}
-          <span className="tools-muted">
-            {creating ? '新建转发 · 文字消息' : '发送记录'}
+        <DialogTitle id="bulk-dialog-title" className="bulk-dialog__header">
+          <span className="bulk-dialog__heading">
+            批量发送
+            <span className="tools-muted">
+              {creating ? '新建转发 · 文字消息' : '发送记录'}
+            </span>
           </span>
+          {!creating && (
+            <Button variant="contained" onClick={() => setCreating(true)}>
+              新建转发
+            </Button>
+          )}
         </DialogTitle>
         <DialogContent>
           <p className="tools-muted">
@@ -343,13 +352,6 @@ const BulkSend = observer(
             </div>
           ) : (
             <div className="bulk-history">
-              <button
-                type="button"
-                className="tools-primary"
-                onClick={() => setCreating(true)}
-              >
-                新建转发
-              </button>
               {records.length === 0 && <p>暂无发送记录</p>}
               {records.map(r => (
                 <article key={r.id}>
