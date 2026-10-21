@@ -81,7 +81,7 @@ try {
     'window.ferdium.stores.services.all.map(s=>s.id)',
   );
   await vm(
-    `globalThis.__zlSessionPrototype = Object.getPrototypeOf(process.getBuiltinModule('module').createRequire(process.cwd()+'/package.json')('electron').session.defaultSession);globalThis.__zlToolsFetch=globalThis.__zlSessionPrototype.fetch;globalThis.__zlSessionPrototype.fetch=async function(url,options){if(String(url).startsWith('https://translate.googleapis.com/')){if(globalThis.__zlTranslateFail) throw Error('synthetic translation failure');await new Promise(r=>setTimeout(r,350));return new Response(JSON.stringify([[[new URLSearchParams(options.body).get('tl')==='zh-CN'?'你好，这是本地测试消息。':'Hello translated']]]),{status:200,headers:{'Content-Type':'application/json'}})}return globalThis.__zlToolsFetch.call(this,url,options)};true`,
+    `globalThis.__zlSessionPrototype = Object.getPrototypeOf(process.getBuiltinModule('module').createRequire(process.cwd()+'/package.json')('electron').session.defaultSession);globalThis.__zlToolsFetch=globalThis.__zlSessionPrototype.fetch;globalThis.__zlSessionPrototype.fetch=async function(url,options){if(String(url).startsWith('https://translate.googleapis.com/')){globalThis.__zlTranslationCalls=(globalThis.__zlTranslationCalls||0)+1;if(globalThis.__zlTranslateFail) throw Error('synthetic translation failure');await new Promise(r=>setTimeout(r,350));return new Response(JSON.stringify([[[new URLSearchParams(options.body).get('tl')==='zh-CN'?'你好，这是本地测试消息。':'Hello translated']]]),{status:200,headers:{'Content-Type':'application/json'}})}return globalThis.__zlToolsFetch.call(this,url,options)};true`,
   );
   mainPatched = true;
   for (let i = 0; i < 2; i += 1) {
@@ -122,6 +122,10 @@ try {
       '!!document.querySelector(".account-dialog input")',
       'dialog input',
     );
+    await wait(
+      `getComputedStyle(document.querySelector('.account-dialog .MuiDialog-container')).opacity === '1'`,
+      'dialog opening transition completed',
+    );
     const rect = await evaluate(
       `(()=>{const n=document.querySelector('.account-dialog input');const r=n.getBoundingClientRect();if(r.top<0||r.bottom>innerHeight||r.width<50||r.height<15)throw Error('Dialog input is offscreen');const at=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);if(at!==n)throw Error('Dialog input is covered');return r.toJSON()})()`,
     );
@@ -139,6 +143,10 @@ try {
       button: 'left',
       clickCount: 1,
     });
+    await wait(
+      `document.activeElement === document.querySelector('.account-dialog input')`,
+      'native click focused dialog input',
+    );
     await call('Input.insertText', { text });
     assert.equal(await evaluate('document.activeElement.value'), text);
   };
@@ -165,6 +173,142 @@ try {
     `!!document.querySelector('.account-tools-panel fieldset')`,
     'translation panel',
   );
+  for (const engine of ['OpenAI', 'Gemini']) {
+    await evaluate(
+      `(()=>{const select=document.querySelector('#zl-AccountTools-10');select.value=${JSON.stringify(engine)};select.dispatchEvent(new Event('change',{bubbles:true}))})()`,
+    );
+    await wait(
+      `document.querySelector('#provider-key-${engine}')?.closest('details')?.open`,
+      'provider configuration expands when selected',
+    );
+    assert.equal(
+      await evaluate(`document.querySelector('#provider-key-${engine}').type`),
+      'password',
+    );
+    assert(
+      await evaluate(`!!document.querySelector('#provider-model-${engine}')`),
+      'provider model is configurable',
+    );
+    await clickText('应用并测试发送翻译');
+    await wait(
+      `document.querySelector('.tools-notice')?.textContent.includes(${JSON.stringify(engine + ' 需要填写 API Key')})`,
+      'provider requires user key',
+    );
+  }
+  await evaluate(
+    `(()=>{const select=document.querySelector('#zl-AccountTools-10');select.value='Google';select.dispatchEvent(new Event('change',{bubbles:true}))})()`,
+  );
+  await clickText('应用');
+  await wait(
+    `document.querySelector('.tools-notice')?.textContent.includes('已应用')`,
+    'restore Google mock',
+  );
+  console.log(
+    'PASS OpenAI/Gemini expose password and model fields and require the user API Key',
+  );
+  const switchTranslation = async label => {
+    await evaluate(
+      `(()=>{const label=[...document.querySelectorAll('.account-tools-panel label')].find(n=>n.textContent.includes(${JSON.stringify(label)}));label.querySelector('input[role="switch"]').click()})()`,
+    );
+    await clickText('应用');
+    await wait(
+      `!document.querySelector('.account-tools-panel fieldset').disabled && document.querySelector('.tools-notice')?.textContent.includes('已应用')`,
+      'translation switch applied',
+    );
+  };
+  await switchTranslation('接收翻译（收发消息）');
+  await wait(
+    `${service(first)}.webview.executeJavaScript('document.querySelectorAll("[data-zl-translate]").length').then(n=>n===2)`,
+    'manual buttons on incoming and sent bubbles',
+  );
+  assert.equal(
+    await vm('globalThis.__zlTranslationCalls || 0'),
+    0,
+    'manual mode must not translate automatically',
+  );
+  for (const bubble of ['.message-in', '.message-out']) {
+    await guest(
+      first,
+      `document.querySelector('${bubble} [data-zl-translate]').click();true`,
+    );
+    await wait(
+      `${service(first)}.webview.executeJavaScript('document.querySelector("${bubble} [data-zl-translation-text]").textContent').then(t=>t.includes('你好'))`,
+      'manual bubble translation',
+    );
+  }
+  assert.equal(
+    await guest(first, 'fixture.sent.length'),
+    0,
+    'translating sent bubbles never resends them',
+  );
+  await vm('globalThis.__zlTranslateFail=true;true');
+  await guest(
+    first,
+    `document.querySelector('#messages').insertAdjacentHTML('beforeend','<div class="message-in" id="manual-retry"><div class="copyable-text"><span class="selectable-text">A unique retry test.</span></div></div>');true`,
+  );
+  await wait(
+    `${service(first)}.webview.executeJavaScript('!!document.querySelector("#manual-retry [data-zl-translate]")')`,
+    'retry bubble button',
+  );
+  await guest(
+    first,
+    `document.querySelector('#manual-retry [data-zl-translate]').click();true`,
+  );
+  await wait(
+    `${service(first)}.webview.executeJavaScript('document.querySelector("#manual-retry [data-zl-translation-text]").textContent').then(t=>t.includes('重试'))`,
+    'manual failure',
+  );
+  await vm('globalThis.__zlTranslateFail=false;true');
+  await guest(
+    first,
+    `document.querySelector('#manual-retry [data-zl-translate]').click();true`,
+  );
+  await wait(
+    `${service(first)}.webview.executeJavaScript('document.querySelector("#manual-retry [data-zl-translation-text]").textContent').then(t=>t.includes('你好'))`,
+    'manual retry succeeds',
+  );
+  console.log(
+    'PASS receive toggle adds manual translate to incoming and sent messages, no automatic requests, retry works without resending',
+  );
+  await vm('globalThis.__zlTranslateFail=true;true');
+  await switchTranslation('翻译预览');
+  await wait(
+    `${service(first)}.webview.executeJavaScript('[...document.querySelectorAll("[data-zl-translate]")].every(n=>!n.disabled && n.textContent==="点击翻译") && [...document.querySelectorAll("[data-zl-translation-text]")].every(n=>n.textContent.includes("重试"))')`,
+    'preview errors retain manual buttons',
+  );
+  const failedCalls = await vm('globalThis.__zlTranslationCalls');
+  await new Promise(resolve => {
+    setTimeout(resolve, 900);
+  });
+  assert.equal(
+    await vm('globalThis.__zlTranslationCalls'),
+    failedCalls,
+    'failed preview must not hammer provider',
+  );
+  await vm('globalThis.__zlTranslateFail=false;true');
+  await guest(
+    first,
+    `document.querySelector('.message-out [data-zl-translate]').click();true`,
+  );
+  await wait(
+    `${service(first)}.webview.executeJavaScript('document.querySelector(".message-out [data-zl-translation-text]").textContent').then(t=>t.includes('你好'))`,
+    'preview fallback manual retry',
+  );
+  await switchTranslation('翻译预览');
+  await switchTranslation('翻译预览');
+  await wait(
+    `${service(first)}.webview.executeJavaScript('[...document.querySelectorAll("[data-zl-translation-text]")].every(n=>n.textContent.includes("你好"))')`,
+    'preview automatically translates both directions',
+  );
+  await shot('/workspace/ZL-WA-message-preview.png');
+  await switchTranslation('接收翻译（收发消息）');
+  await wait(
+    `${service(first)}.webview.executeJavaScript('document.querySelectorAll("[data-zl-translation]").length').then(n=>n===0)`,
+    'disable removes message controls',
+  );
+  console.log(
+    'PASS preview auto translates incoming/sent messages, errors retain manual controls, disabled feature removes all controls',
+  );
   await evaluate(
     `document.querySelectorAll('.account-tools-panel input[role="switch"]').forEach(n=>{if(!n.checked)n.click()})`,
   );
@@ -189,7 +333,7 @@ try {
   );
   await guest(
     first,
-    `document.querySelector('[contenteditable]').innerText='你好';document.querySelector('button').click();true`,
+    `document.querySelector('[contenteditable]').innerText='你好';document.querySelector('footer button').click();true`,
   );
   assert.equal(
     await guest(first, 'fixture.sent.length'),
@@ -208,10 +352,14 @@ try {
     0,
     'translated preview must remain unsent',
   );
+  assert(
+    (await guest(first, 'fixture.nativeInputs')) > 0,
+    'replacement must use trusted native editor input when execCommand fails',
+  );
   await shot('/workspace/ZL-WA-translation.png');
   await guest(
     first,
-    `document.querySelector('[contenteditable]').innerText='Hello corrected';document.querySelector('button').click();true`,
+    `document.querySelector('[contenteditable]').innerText='Hello corrected';document.querySelector('footer button').click();true`,
   );
   assert.deepEqual(await guest(first, 'fixture.sent'), ['Hello corrected']);
   console.log(
@@ -220,7 +368,7 @@ try {
   await vm(`globalThis.__zlTranslateFail=true;true`);
   await guest(
     first,
-    `document.querySelector('[contenteditable]').innerText='失败测试';document.querySelector('button').click();true`,
+    `document.querySelector('[contenteditable]').innerText='失败测试';document.querySelector('footer button').click();true`,
   );
   await new Promise(r => {
     setTimeout(r, 1000);
@@ -241,7 +389,7 @@ try {
   // Edit while translation is pending: stale result must never replace it.
   await guest(
     first,
-    `document.querySelector('[contenteditable]').innerText='等待翻译';document.querySelector('button').click();document.querySelector('[contenteditable]').innerText='已修改内容';true`,
+    `document.querySelector('[contenteditable]').innerText='等待翻译';document.querySelector('footer button').click();document.querySelector('[contenteditable]').innerText='已修改内容';true`,
   );
   await new Promise(r => {
     setTimeout(r, 1000);
@@ -279,7 +427,7 @@ try {
   console.log('PASS Enter first/second send and held-key protection');
   await guest(
     first,
-    `document.querySelector('[contenteditable]').innerText='切换聊天测试';document.querySelector('button').click();document.querySelector('header span').dataset.id='other-chat';true`,
+    `document.querySelector('[contenteditable]').innerText='切换聊天测试';document.querySelector('footer button').click();document.querySelector('header span').dataset.id='other-chat';true`,
   );
   await new Promise(r => {
     setTimeout(r, 1000);
@@ -527,7 +675,7 @@ try {
   if (mainPatched)
     try {
       await vm(
-        `globalThis.__zlSessionPrototype.fetch=globalThis.__zlToolsFetch;delete globalThis.__zlSessionPrototype;delete globalThis.__zlToolsFetch;delete globalThis.__zlTranslateFail;globalThis.__zlProxyTLS?.closeAllConnections();globalThis.__zlProxyTLS?.close();globalThis.__zlProxyServer?.closeAllConnections();globalThis.__zlProxyServer?.close();true`,
+        `globalThis.__zlSessionPrototype.fetch=globalThis.__zlToolsFetch;delete globalThis.__zlSessionPrototype;delete globalThis.__zlToolsFetch;delete globalThis.__zlTranslateFail;delete globalThis.__zlTranslationCalls;globalThis.__zlProxyTLS?.closeAllConnections();globalThis.__zlProxyTLS?.close();globalThis.__zlProxyServer?.closeAllConnections();globalThis.__zlProxyServer?.close();true`,
       );
     } catch {
       /* A failed app connection may already have closed; fixtures remain isolated. */

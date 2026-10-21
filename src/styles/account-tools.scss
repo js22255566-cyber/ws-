@@ -336,3 +336,15 @@
     grid-column: auto;
   }
 }
+
+.tools-provider {
+  margin: 12px 0;
+  padding: 10px;
+  border: 1px solid #414650;
+  border-radius: 7px;
+  summary {
+    cursor: pointer;
+    color: #91bfff;
+    line-height: 1.5;
+  }
+}

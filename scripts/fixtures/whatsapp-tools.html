@@ -37,9 +37,12 @@
       }
       #messages {
         flex: 1;
+        min-height: 0;
+        overflow-y: auto;
         padding: 25px;
       }
-      .message-in {
+      .message-in,
+      .message-out {
         background: #202c33;
         padding: 14px;
         max-width: 90%;
@@ -93,6 +96,13 @@
               >
             </div>
           </div>
+          <div class="message-out">
+            <div class="copyable-text">
+              <span class="selectable-text"
+                >Sent message for manual translation.</span
+              >
+            </div>
+          </div>
         </div>
         <footer>
           <div
@@ -105,7 +115,9 @@
       </div>
     </div>
     <script>
-      window.fixture = { sent: [], bulk: [], fail: false };
+      window.fixture = { sent: [], bulk: [], fail: false, nativeInputs: 0 };
+      // Simulate the affected editor: webpage execCommand cannot replace its text.
+      document.execCommand = () => false;
       const chats = [
         {
           id: { _serialized: '10001@g.us', server: 'g.us', user: '10001' },
@@ -172,6 +184,9 @@
         return modules[name];
       };
       const editor = document.querySelector('[contenteditable]');
+      editor.addEventListener('input', event => {
+        if (event.isTrusted) fixture.nativeInputs++;
+      });
       const send = () => {
         if (editor.innerText.trim()) {
           fixture.sent.push(editor.innerText);
@@ -179,7 +194,7 @@
           editor.dispatchEvent(new Event('input', { bubbles: true }));
         }
       };
-      document.querySelector('button').addEventListener('click', send);
+      document.querySelector('footer button').addEventListener('click', send);
       editor.addEventListener('keydown', e => {
         if (e.key === 'Enter' && !e.shiftKey) {
           e.preventDefault();

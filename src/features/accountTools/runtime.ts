@@ -36,7 +36,10 @@ export function startTranslations(stores: RealStores): () => void {
   let stopped = false;
   const running = new Set<string>();
   const pending = new Set<string>();
-  const cache = new Map<string, { text: string; error: boolean }>();
+  const cache = new Map<
+    string,
+    { text: string; error: boolean; message?: string }
+  >();
   const tick = async (service: RealStores['services']['all'][number]) => {
     const view = service.webview;
     if (
@@ -88,10 +91,39 @@ export function startTranslations(stores: RealStores): () => void {
             result = { text: '', error: true };
           }
           try {
-            if (!stopped && service.webview === view)
-              await view.executeJavaScript(
-                `(${translationResult.toString()})(${job.id},${JSON.stringify(job.token)},${JSON.stringify(result ?? { text: '', error: true })})`,
+            if (!stopped && service.webview === view) {
+              let delivered = result ?? { text: '', error: true };
+              if (job.direction === 'outgoing' && !delivered.error) {
+                if (
+                  stores.services.active !== service ||
+                  document.querySelector('[role="dialog"], [role="menu"]') ||
+                  document.activeElement?.matches(
+                    'input, textarea, select, [contenteditable="true"]',
+                  )
+                )
+                  delivered = {
+                    text: '',
+                    error: true,
+                    message: '账号、焦点已变化或有弹窗打开，请返回聊天重新翻译',
+                  };
+                else view.focus();
+              }
+              const ready = await view.executeJavaScript(
+                `(${translationResult.toString()})(${job.id},${JSON.stringify(job.token)},${JSON.stringify(delivered)},'prepare')`,
               );
+              if (ready) {
+                try {
+                  await view.insertText(delivered.text);
+                  await view.executeJavaScript(
+                    `(${translationResult.toString()})(${job.id},${JSON.stringify(job.token)},${JSON.stringify(delivered)},'complete')`,
+                  );
+                } catch {
+                  await view.executeJavaScript(
+                    `(${translationResult.toString()})(${job.id},${JSON.stringify(job.token)},{text:'',error:true,message:'无法写入输入框，消息尚未发送'},'prepare')`,
+                  );
+                }
+              }
+            }
           } catch {
             /* A navigation or sleep discards the old document's request. */
           } finally {

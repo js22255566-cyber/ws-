@@ -343,10 +343,28 @@ const SettingsPanel = observer(
                 />
                 <hr />
                 <Switch
-                  label="接收自动翻译"
+                  label="接收翻译（收发消息）"
                   value={config.translation.incoming}
-                  onChange={incoming => translation({ incoming })}
+                  onChange={incoming =>
+                    translation({
+                      incoming,
+                      ...(!incoming ? { preview: false } : {}),
+                    })
+                  }
                 />
+                <Switch
+                  label="翻译预览"
+                  value={config.translation.preview}
+                  onChange={preview =>
+                    translation({
+                      preview,
+                      ...(preview ? { incoming: true } : {}),
+                    })
+                  }
+                />
+                <p className="tools-muted">
+                  开启接收翻译后，收发文字消息下方显示「点击翻译」。开启翻译预览后自动翻译这些消息；未成功翻译的消息保留按钮，可手动重试。消息译文使用接收翻译通道及目标语言。
+                </p>
                 <label htmlFor="receive-engine">
                   接收翻译通道
                   <select
@@ -383,6 +401,8 @@ const SettingsPanel = observer(
                 />
                 {[
                   ...new Set([
+                    'OpenAI' as const,
+                    'Gemini' as const,
                     config.translation.engine,
                     config.translation.receiveEngine,
                   ]),
@@ -392,80 +412,93 @@ const SettingsPanel = observer(
                       engine !== 'Google' && engine !== 'LibreTranslate',
                   )
                   .map(engine => (
-                    <fieldset key={engine}>
-                      <legend>{engine} 配置（此账号）</legend>
-                      <label htmlFor={`provider-key-${engine}`}>
-                        API Key
-                        <input
-                          id={`provider-key-${engine}`}
-                          type="password"
-                          autoComplete="new-password"
-                          value={config.providers?.[engine]?.apiKey ?? ''}
-                          placeholder={
-                            config.providers?.[engine]?.hasApiKey
-                              ? '已安全保存；留空保留原 Key'
-                              : '请输入自己的 API Key'
-                          }
-                          onChange={event => {
-                            const apiKey = event.target.value;
-                            setConfig(c => ({
-                              ...c,
-                              providers: {
-                                ...c.providers,
-                                [engine]: {
-                                  ...c.providers?.[engine],
-                                  apiKey: apiKey || undefined,
-                                },
-                              },
-                            }));
-                          }}
-                        />
-                      </label>
-                      {config.providers?.[engine]?.hasApiKey && (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setConfig(c => ({
-                              ...c,
-                              providers: {
-                                ...c.providers,
-                                [engine]: {
-                                  ...c.providers?.[engine],
-                                  apiKey: '',
-                                  hasApiKey: false,
-                                },
-                              },
-                            }))
-                          }
-                        >
-                          清除已保存 Key（应用后生效）
-                        </button>
-                      )}
-                      {(engine === 'OpenAI' || engine === 'Gemini') && (
-                        <label htmlFor={`provider-model-${engine}`}>
-                          模型名称
+                    <details
+                      key={engine}
+                      className="tools-provider"
+                      open={
+                        config.translation.engine === engine ||
+                        config.translation.receiveEngine === engine
+                      }
+                    >
+                      <summary>{engine} API Key 设置（此账号）</summary>
+                      <fieldset>
+                        <legend>{engine} 配置</legend>
+                        <label htmlFor={`provider-key-${engine}`}>
+                          API Key
                           <input
-                            id={`provider-model-${engine}`}
-                            value={config.providers?.[engine]?.model ?? ''}
+                            id={`provider-key-${engine}`}
+                            type="password"
+                            autoComplete="new-password"
+                            value={config.providers?.[engine]?.apiKey ?? ''}
                             placeholder={
-                              engine === 'OpenAI'
-                                ? 'gpt-4.1-mini'
-                                : 'gemini-2.5-flash'
+                              config.providers?.[engine]?.hasApiKey
+                                ? '已安全保存；留空保留原 Key'
+                                : '请输入自己的 API Key'
                             }
                             onChange={event => {
-                              const model = event.target.value;
+                              const apiKey = event.target.value;
                               setConfig(c => ({
                                 ...c,
                                 providers: {
                                   ...c.providers,
-                                  [engine]: { ...c.providers?.[engine], model },
+                                  [engine]: {
+                                    ...c.providers?.[engine],
+                                    apiKey: apiKey || undefined,
+                                  },
                                 },
                               }));
                             }}
                           />
                         </label>
-                      )}
-                    </fieldset>
+                        {config.providers?.[engine]?.hasApiKey && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setConfig(c => ({
+                                ...c,
+                                providers: {
+                                  ...c.providers,
+                                  [engine]: {
+                                    ...c.providers?.[engine],
+                                    apiKey: '',
+                                    hasApiKey: false,
+                                  },
+                                },
+                              }))
+                            }
+                          >
+                            清除已保存 Key（应用后生效）
+                          </button>
+                        )}
+                        {(engine === 'OpenAI' || engine === 'Gemini') && (
+                          <label htmlFor={`provider-model-${engine}`}>
+                            模型名称
+                            <input
+                              id={`provider-model-${engine}`}
+                              value={config.providers?.[engine]?.model ?? ''}
+                              placeholder={
+                                engine === 'OpenAI'
+                                  ? 'gpt-4.1-mini'
+                                  : 'gemini-2.5-flash'
+                              }
+                              onChange={event => {
+                                const model = event.target.value;
+                                setConfig(c => ({
+                                  ...c,
+                                  providers: {
+                                    ...c.providers,
+                                    [engine]: {
+                                      ...c.providers?.[engine],
+                                      model,
+                                    },
+                                  },
+                                }));
+                              }}
+                            />
+                          </label>
+                        )}
+                      </fieldset>
+                    </details>
                   ))}
                 <p className="tools-muted">
                   Google 免 Key 通道为非官方接口，可用性和额度无法保证；DeepL
@@ -482,7 +515,7 @@ const SettingsPanel = observer(
                   第一次发送仅替换为译文；请校正后再次发送。翻译失败时保留原文，不发送消息。
                 </p>
                 <p className="tools-muted">
-                  接收翻译显示在当前已加载的文字消息下方。启用后，消息文字将发送至所选第三方翻译服务。
+                  手动点击或开启翻译预览后，消息文字将发送至所选第三方翻译服务。仅处理当前聊天已加载的文字。
                 </p>
               </>
             )}

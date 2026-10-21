@@ -1,6 +1,5 @@
 /* eslint-disable no-continue -- Skip unsupported or already translated message nodes. */
 /* eslint-disable unicorn/prefer-dom-node-text-content -- innerText preserves contenteditable line breaks. */
-/* eslint-disable sonar/deprecation -- execCommand is required to update WhatsApp's editor undo/input state. */
 // Self-contained guest functions; do not import host objects or expose host IPC.
 import type { Recipient, TranslationConfig } from './config';
 
@@ -64,6 +63,12 @@ export function translationTick(
       }
       n.textContent = text;
     };
+    state.normalizeText = (text: string) =>
+      text
+        .replaceAll('\u00A0', ' ')
+        .replaceAll('\r\n', '\n')
+        .replaceAll('\u200B', '')
+        .trim();
     state.notice = notice;
     state.composer = composer;
     state.chatKey = chatKey;
@@ -186,88 +191,215 @@ export function translationTick(
   }
   state.config = config;
   if (config.incoming) {
-    // Only mounted incoming text bubbles. Never read outgoing messages, quoted text or the contact sidebar.
-    for (const bubble of document.querySelectorAll<HTMLElement>(
-      '#main .message-in',
+    const bubbles = new Set<HTMLElement>();
+    for (const node of document.querySelectorAll<HTMLElement>(
+      '#main .message-in, #main .message-out, #main [data-id^="true_"], #main [data-id^="false_"]',
     )) {
-      const textNode = bubble.querySelector<HTMLElement>(
-        '.copyable-text .selectable-text, [data-testid="msg-text"], [data-testid="selectable-text"]',
+      const bubble =
+        node.closest<HTMLElement>('.message-in, .message-out') ||
+        node.querySelector<HTMLElement>('.message-in, .message-out') ||
+        node;
+      bubbles.add(bubble);
+    }
+    for (const bubble of bubbles) {
+      const textNode = [
+        ...bubble.querySelectorAll<HTMLElement>(
+          '.selectable-text.copyable-text, .copyable-text .selectable-text, [data-testid="msg-text"], [data-testid="selectable-text"]',
+        ),
+      ].find(
+        node =>
+          !node.closest(
+            '[data-zl-translation], [data-testid*="quoted"], [data-testid*="link-preview"], blockquote',
+          ),
       );
       if (!textNode) continue;
       const text = textNode.innerText;
+      if (!text.trim() || text.length > 12_000) continue;
+      const identity = `${state.chatKey()}:${bubble.closest('[data-id]')?.getAttribute('data-id') || ''}`;
+      let record = state.incoming.get(textNode);
       if (
-        !text.trim() ||
-        text.length > 12_000 ||
-        state.incoming.get(textNode) === text ||
-        state.pending.size >= 12
-      )
-        continue;
-      state.incoming.set(textNode, text);
-      state.sequence += 1;
-      const id = state.sequence;
-      state.pending.set(id, {
-        direction: 'incoming',
-        input: textNode,
-        text,
-        bubble,
-      });
-      state.queue.push({ id, token: state.token, text, direction: 'incoming' });
+        !record ||
+        record.text !== text ||
+        record.identity !== identity ||
+        !record.container.isConnected
+      ) {
+        record?.container.remove();
+        const container = document.createElement('div');
+        container.dataset.zlTranslation = 'true';
+        container.style.cssText =
+          'height:auto;clear:both;padding:6px 0 2px;text-align:left;white-space:pre-wrap;font:13px/1.5 sans-serif';
+        const label = document.createElement('div');
+        label.dataset.zlTranslationText = 'true';
+        label.style.cssText =
+          'height:auto;color:#ffe45c;white-space:pre-wrap;overflow-wrap:anywhere';
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.dataset.zlTranslate = 'true';
+        button.textContent = '点击翻译';
+        button.style.cssText =
+          'display:inline-flex;align-items:center;border:0;border-radius:5px;background:#175aff;color:#fff;padding:7px 10px;margin:4px 0;cursor:pointer;font:13px/1.4 sans-serif';
+        container.append(label, button);
+        const mount = textNode.closest('.copyable-text');
+        if (mount && mount !== textNode) mount.append(container);
+        else textNode.after(container);
+        record = {
+          text,
+          identity,
+          container,
+          label,
+          button,
+          status: 'idle',
+          autoAttempted: false,
+        };
+        state.incoming.set(textNode, record);
+        const current = record;
+        current.request = (manual: boolean) => {
+          if (
+            !state.config.incoming ||
+            current.status === 'pending' ||
+            !textNode.isConnected ||
+            textNode.innerText !== current.text
+          )
+            return;
+          if (state.pending.size >= 12) {
+            button.title = '翻译队列繁忙，请稍后点击重试';
+            return;
+          }
+          current.status = 'pending';
+          current.autoAttempted = true;
+          button.disabled = true;
+          button.textContent = '翻译中…';
+          label.textContent = '';
+          state.sequence += 1;
+          const id = state.sequence;
+          state.pending.set(id, {
+            direction: 'incoming',
+            input: textNode,
+            text: current.text,
+            bubble,
+            record: current,
+          });
+          const request = {
+            id,
+            token: state.token,
+            text: current.text,
+            direction: 'incoming',
+          };
+          if (manual) state.queue.unshift(request);
+          else state.queue.push(request);
+        };
+        button.addEventListener('click', event => {
+          event.preventDefault();
+          event.stopPropagation();
+          current.request(true);
+        });
+      }
+      if (config.preview && !record.autoAttempted) record.request(false);
     }
   } else
     document.querySelectorAll('[data-zl-translation]').forEach(n => n.remove());
   return drain ? state.queue.splice(0, 4) : [];
 }
 
+// Prepare a selection for Electron's native insertText, then verify the editor
+// after that trusted input event. DOM/execCommand mutation is insufficient for Lexical.
 export function translationResult(
   id: number,
   token: string,
   result: { text: string; error: boolean; message?: string },
-): void {
-  if (globalThis.location.hostname !== 'web.whatsapp.com') return;
+  phase: 'prepare' | 'complete' = 'prepare',
+): boolean {
+  if (globalThis.location.hostname !== 'web.whatsapp.com') return false;
   const state = (window as any).__zlTranslation;
-  if (state?.token !== token) return;
-  const job = state?.pending.get(id);
-  if (!job) return;
-  state.pending.delete(id);
+  if (state?.token !== token) return false;
+  const job = state.pending.get(id);
+  if (!job) return false;
   if (job.direction === 'outgoing') {
-    state.busy = false;
-    if (
-      !job.input.isConnected ||
-      state.composer() !== job.input ||
-      state.chatKey() !== job.chat ||
-      job.input.innerText !== job.text
-    ) {
-      state.notice('输入内容或聊天已变化，本次译文已丢弃；消息尚未发送');
-      return;
+    const valid =
+      job.input.isConnected &&
+      state.composer() === job.input &&
+      state.chatKey() === job.chat;
+    if (phase === 'complete') {
+      state.pending.delete(id);
+      state.busy = false;
+      if (
+        valid &&
+        state.normalizeText(job.input.innerText) ===
+          state.normalizeText(result.text)
+      ) {
+        state.approved = { input: job.input, chat: job.chat };
+        state.notice('译文已填入：请校正后再次发送');
+      } else
+        state.notice(
+          '输入框或聊天已变化，译文未确认；消息尚未发送，请核查草稿',
+        );
+      return false;
     }
-    if (result.error || !result.text?.trim()) {
-      state.notice(`${result.message || '翻译失败'}；原文未发送，请重试`);
-      return;
+    if (
+      !valid ||
+      job.input.innerText !== job.text ||
+      result.error ||
+      !result.text?.trim()
+    ) {
+      state.pending.delete(id);
+      state.busy = false;
+      state.notice(
+        result.error
+          ? `${result.message || '翻译失败'}；消息尚未发送，请重试`
+          : '输入内容或聊天已变化，本次译文已丢弃；消息尚未发送',
+      );
+      return false;
     }
     job.input.focus();
-    document.getSelection()?.selectAllChildren(job.input);
-    const replaced = document.execCommand('insertText', false, result.text);
-    if (!replaced || job.input.innerText.trim() !== result.text.trim()) {
-      state.notice('无法替换输入框，消息未发送，请重试');
-      return;
+    // Focus handlers may replace the editor; revalidate before selecting anything.
+    if (state.composer() !== job.input || job.input.innerText !== job.text) {
+      state.pending.delete(id);
+      state.busy = false;
+      state.notice('输入框已变化，原文未发送；请重新翻译');
+      return false;
     }
-    state.approved = { input: job.input, chat: job.chat };
-    state.notice('译文已填入：请校正后再次发送');
-  } else if (
-    state.config.incoming &&
-    job.input.isConnected &&
-    job.input.innerText === job.text
-  ) {
-    job.bubble.querySelector('[data-zl-translation]')?.remove();
-    const label = document.createElement('div');
-    label.dataset.zlTranslation = 'true';
-    label.style.cssText =
-      'height:auto;color:#77baff;font-size:13px;padding:6px 0;white-space:pre-wrap';
-    label.textContent = result.error
-      ? `${result.message || '翻译失败'}（切换翻译开关可重试）`
-      : result.text;
-    job.bubble.append(label);
+    const range = document.createRange();
+    range.selectNodeContents(job.input);
+    const selection = document.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    if (
+      !selection ||
+      (selection.anchorNode !== job.input &&
+        !job.input.contains(selection.anchorNode))
+    ) {
+      state.pending.delete(id);
+      state.busy = false;
+      state.notice('无法选中消息输入框，原文未发送；请重试');
+      return false;
+    }
+    return true;
   }
+  state.pending.delete(id);
+  const { record } = job;
+  if (
+    !state.config.incoming ||
+    !job.input.isConnected ||
+    job.input.innerText !== job.text ||
+    !record?.container.isConnected ||
+    state.incoming.get(job.input) !== record
+  )
+    return false;
+  record.button.disabled = false;
+  record.button.textContent = '点击翻译';
+  if (result.error || !result.text?.trim()) {
+    record.status = 'error';
+    record.label.textContent = `${result.message || '翻译失败'}；可点击重试`;
+    record.button.hidden = false;
+    record.button.style.display = 'inline-flex';
+  } else {
+    record.status = 'done';
+    record.label.textContent = result.text;
+    record.container.style.borderTop = '1px dashed #ffe45c';
+    record.button.hidden = true;
+    record.button.style.display = 'none';
+  }
+  return false;
 }
 
 export function listRecipients(): Omit<Recipient, 'accountId'>[] {

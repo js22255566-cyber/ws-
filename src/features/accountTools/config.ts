@@ -25,6 +25,7 @@ export interface ProviderCredential {
 export interface TranslationConfig {
   outgoing: boolean;
   incoming: boolean;
+  preview: boolean;
   engine: TranslationEngine;
   receiveEngine: TranslationEngine;
   receiveSource: string;
@@ -49,6 +50,7 @@ export const defaultTools = (): ToolsConfig => ({
   translation: {
     outgoing: false,
     incoming: false,
+    preview: false,
     engine: 'Google',
     receiveEngine: 'Google',
     receiveSource: 'auto',

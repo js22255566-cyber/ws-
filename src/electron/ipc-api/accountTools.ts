@@ -248,6 +248,7 @@ export default ({ mainWindow }: { mainWindow: BrowserWindow }) => {
         translation: {
           outgoing: Boolean(input.translation.outgoing),
           incoming: Boolean(input.translation.incoming),
+          preview: Boolean(input.translation.preview),
           engine: input.translation.engine,
           receiveEngine: input.translation.receiveEngine,
           source: input.translation.source,

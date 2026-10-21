@@ -245,6 +245,31 @@ describe('privileged account tools IPC', () => {
     const cleared = await invoke('save', 'account-1', preserved);
     expect(cleared.providers.OpenAI.hasApiKey).toBe(false);
   });
+  it.each(['OpenAI', 'Gemini'] as const)(
+    'uses the user-supplied %s key only in privileged provider requests',
+    async engine => {
+      const c = defaultTools();
+      c.translation.outgoing = true;
+      c.translation.engine = engine;
+      c.providers = {
+        [engine]: { apiKey: 'synthetic-user-key', model: 'synthetic-model' },
+      };
+      const saved = await invoke('save', 'account-1', c);
+      expect(JSON.stringify(saved)).not.toContain('synthetic-user-key');
+      await invoke('translate', 'account-1', 'hello', 'outgoing');
+      expect(
+        require('../src/electron/accountTranslation').translateAccount,
+      ).toHaveBeenCalledWith(
+        expect.any(Function),
+        'hello',
+        'en',
+        engine,
+        'auto',
+        'synthetic-user-key',
+        'synthetic-model',
+      );
+    },
+  );
   it('deleting an account removes its stored credential/configuration', async () => {
     await invoke('save', 'account-1', defaultTools());
     await invoke('remove', 'account-1');
