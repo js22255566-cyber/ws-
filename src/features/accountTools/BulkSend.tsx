@@ -159,7 +159,7 @@ const BulkSend = observer(
       try {
         const spec: BulkSpec = {
           type,
-          text,
+          text: ['image', 'audio', 'contact'].includes(type) ? '' : text,
           media,
           contactName,
           contactPhone: contactPhone.replace(/^\+/, ''),

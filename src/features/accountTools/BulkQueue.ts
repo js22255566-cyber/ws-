@@ -139,7 +139,13 @@ export default class BulkQueue {
     await this.adapter.save(record);
   }
 
-  async submit(spec: BulkSpec) {
+  async submit(input: BulkSpec) {
+    const spec = {
+      ...input,
+      text: ['image', 'audio', 'contact'].includes(input.type)
+        ? ''
+        : input.text,
+    };
     validateBulkSpec(spec);
     await this.load();
     if (this.activeId || this.submitting)

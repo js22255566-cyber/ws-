@@ -199,6 +199,21 @@ describe('persistent bulk queue without live WhatsApp', () => {
     );
     expect(queue.records[0].deliveries?.[0].revoked).toBeUndefined();
   });
+  it('records the actual image filename rather than a hidden previous text draft', async () => {
+    const value = spec({
+      type: 'image',
+      text: 'previous hidden draft',
+      targets: [spec().targets[0]],
+      media: { id: 'media', name: 'actual.png', mime: 'image/png', size: 10 },
+    });
+    await finish(queue.submit(value));
+    expect(queue.records[0].text).toBe('actual.png');
+    expect(queue.records[0].spec?.text).toBe('');
+    expect(adapter.send).toHaveBeenCalledWith(
+      value.targets[0],
+      expect.objectContaining({ text: '', type: 'image' }),
+    );
+  });
   it('rejects invalid content, intervals, missing media, invalid cards and duplicate targets', () => {
     for (const item of [
       spec({ text: '' }),
