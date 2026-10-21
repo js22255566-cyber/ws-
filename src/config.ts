@@ -663,7 +663,7 @@ export const DEFAULT_APP_SETTINGS = {
   enableLongPressServiceHint: false,
   isTodosFeatureEnabled: true,
   customTodoServer: '',
-  locale: 'en-US',
+  locale: 'zh-HANS',
   keepAllWorkspacesLoaded: false,
   useSelfSignedCertificates: false,
   sandboxServices: true,

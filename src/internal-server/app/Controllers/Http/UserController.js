@@ -43,7 +43,7 @@ const DEFAULT_USER_DATA = {
   id: '82c1cf9d-ab58-4da2-b55e-aaa41d2142d8',
   isSubscriptionOwner: true,
   lastname: 'Application',
-  locale: DEFAULT_APP_SETTINGS.fallbackLocale,
+  locale: DEFAULT_APP_SETTINGS.locale,
 };
 
 class UserController {

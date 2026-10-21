@@ -308,13 +308,19 @@
   color: #d32f2f;
   font-size: 13px;
 }
+// MUI focus-trap sentinels must not inherit the upstream div height:100%.
+// Otherwise the first invisible sentinel moves the dialog below the viewport.
 .account-dialog {
-  .MuiDialog-paper,
-  .MuiDialogContent-root,
-  .MuiDialogActions-root,
-  .MuiTextField-root,
-  .MuiInputBase-root {
+  div,
+  form {
     height: auto;
+  }
+  > .MuiDialog-container {
+    height: 100%;
+  }
+  [data-testid='sentinelStart'],
+  [data-testid='sentinelEnd'] {
+    height: 0;
   }
 }
 @media (max-width: 800px) {

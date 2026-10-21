@@ -31,7 +31,7 @@ export function translationTick(
     page.__zlTranslation = state;
     const composer = () =>
       document.querySelector<HTMLElement>(
-        '#main footer [contenteditable="true"][role="textbox"]',
+        '#main footer [contenteditable="true"][role="textbox"], #main footer [contenteditable="true"][data-lexical-editor="true"]',
       );
     const chatKey = () => {
       try {
@@ -191,7 +191,7 @@ export function translationTick(
       '#main .message-in',
     )) {
       const textNode = bubble.querySelector<HTMLElement>(
-        '.copyable-text .selectable-text',
+        '.copyable-text .selectable-text, [data-testid="msg-text"], [data-testid="selectable-text"]',
       );
       if (!textNode) continue;
       const text = textNode.innerText;
@@ -221,7 +221,7 @@ export function translationTick(
 export function translationResult(
   id: number,
   token: string,
-  result: { text: string; error: boolean },
+  result: { text: string; error: boolean; message?: string },
 ): void {
   if (globalThis.location.hostname !== 'web.whatsapp.com') return;
   const state = (window as any).__zlTranslation;
@@ -241,7 +241,7 @@ export function translationResult(
       return;
     }
     if (result.error || !result.text?.trim()) {
-      state.notice('翻译失败，原文未发送；请重试');
+      state.notice(`${result.message || '翻译失败'}；原文未发送，请重试`);
       return;
     }
     job.input.focus();
@@ -264,7 +264,7 @@ export function translationResult(
     label.style.cssText =
       'height:auto;color:#77baff;font-size:13px;padding:6px 0;white-space:pre-wrap';
     label.textContent = result.error
-      ? '翻译失败（切换翻译开关可重试）'
+      ? `${result.message || '翻译失败'}（切换翻译开关可重试）`
       : result.text;
     job.bubble.append(label);
   }

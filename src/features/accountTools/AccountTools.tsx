@@ -4,7 +4,12 @@ import { observer } from 'mobx-react';
 import { useEffect, useState, useId } from 'react';
 import type { StoresProps } from '../../@types/ferdium-components.types';
 import type Service from '../../models/Service';
-import { defaultTools, parseProxy, type ToolsConfig } from './config';
+import {
+  defaultTools,
+  parseProxy,
+  translationEngines,
+  type ToolsConfig,
+} from './config';
 import {
   configureTranslation,
   getTools,
@@ -118,7 +123,7 @@ const SettingsPanel = observer(
       setConfig(c => ({ ...c, proxy: { ...c.proxy, ...change } }));
     const translation = (change: Partial<ToolsConfig['translation']>) =>
       setConfig(c => ({ ...c, translation: { ...c.translation, ...change } }));
-    const apply = async (test = false) => {
+    const apply = async (test: boolean | 'incoming' | 'outgoing' = false) => {
       setBusy(true);
       setNotice('');
       try {
@@ -128,7 +133,18 @@ const SettingsPanel = observer(
         if (panel === 'translation') await configureTranslation(service);
         if (JSON.stringify(old.proxy) !== JSON.stringify(saved.proxy))
           service.webview?.reload();
-        if (test) {
+        if (typeof test === 'string') {
+          const result = await ipcRenderer.invoke(
+            'account-tools-test-translation',
+            service.id,
+            test,
+          );
+          setNotice(
+            result.error
+              ? result.message || '翻译测试失败'
+              : `翻译测试成功：${result.text}`,
+          );
+        } else if (test) {
           const result = await ipcRenderer.invoke(
             'account-tools-test-proxy',
             service.id,
@@ -275,7 +291,8 @@ const SettingsPanel = observer(
                       识别代理信息
                     </button>
                     <p className="tools-muted">
-                      SOCKS5 支持无认证连接。用户名密码认证请使用 HTTP/HTTPS。
+                      SOCKS5
+                      支持用户名密码认证，通过此账号独立的本地桥接连接上游代理。
                     </p>
                   </>
                 )}
@@ -302,8 +319,15 @@ const SettingsPanel = observer(
                       })
                     }
                   >
-                    <option value="Google">Google</option>
-                    <option value="LibreTranslate">LibreTranslate</option>
+                    {translationEngines.map(engine => (
+                      <option key={engine} value={engine}>
+                        {engine === 'Google'
+                          ? 'Google（免 Key）'
+                          : engine === 'DeepL'
+                            ? 'DeepL API Free（自填 Key）'
+                            : engine}
+                      </option>
+                    ))}
                   </select>
                 </label>
                 <Language
@@ -335,8 +359,15 @@ const SettingsPanel = observer(
                       })
                     }
                   >
-                    <option value="Google">Google</option>
-                    <option value="LibreTranslate">LibreTranslate</option>
+                    {translationEngines.map(engine => (
+                      <option key={engine} value={engine}>
+                        {engine === 'Google'
+                          ? 'Google（免 Key）'
+                          : engine === 'DeepL'
+                            ? 'DeepL API Free（自填 Key）'
+                            : engine}
+                      </option>
+                    ))}
                   </select>
                 </label>
                 <Language
@@ -350,6 +381,103 @@ const SettingsPanel = observer(
                   value={config.translation.receiveTarget}
                   onChange={receiveTarget => translation({ receiveTarget })}
                 />
+                {[
+                  ...new Set([
+                    config.translation.engine,
+                    config.translation.receiveEngine,
+                  ]),
+                ]
+                  .filter(
+                    engine =>
+                      engine !== 'Google' && engine !== 'LibreTranslate',
+                  )
+                  .map(engine => (
+                    <fieldset key={engine}>
+                      <legend>{engine} 配置（此账号）</legend>
+                      <label htmlFor={`provider-key-${engine}`}>
+                        API Key
+                        <input
+                          id={`provider-key-${engine}`}
+                          type="password"
+                          autoComplete="new-password"
+                          value={config.providers?.[engine]?.apiKey ?? ''}
+                          placeholder={
+                            config.providers?.[engine]?.hasApiKey
+                              ? '已安全保存；留空保留原 Key'
+                              : '请输入自己的 API Key'
+                          }
+                          onChange={event => {
+                            const apiKey = event.target.value;
+                            setConfig(c => ({
+                              ...c,
+                              providers: {
+                                ...c.providers,
+                                [engine]: {
+                                  ...c.providers?.[engine],
+                                  apiKey: apiKey || undefined,
+                                },
+                              },
+                            }));
+                          }}
+                        />
+                      </label>
+                      {config.providers?.[engine]?.hasApiKey && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setConfig(c => ({
+                              ...c,
+                              providers: {
+                                ...c.providers,
+                                [engine]: {
+                                  ...c.providers?.[engine],
+                                  apiKey: '',
+                                  hasApiKey: false,
+                                },
+                              },
+                            }))
+                          }
+                        >
+                          清除已保存 Key（应用后生效）
+                        </button>
+                      )}
+                      {(engine === 'OpenAI' || engine === 'Gemini') && (
+                        <label htmlFor={`provider-model-${engine}`}>
+                          模型名称
+                          <input
+                            id={`provider-model-${engine}`}
+                            value={config.providers?.[engine]?.model ?? ''}
+                            placeholder={
+                              engine === 'OpenAI'
+                                ? 'gpt-4.1-mini'
+                                : 'gemini-2.5-flash'
+                            }
+                            onChange={event => {
+                              const model = event.target.value;
+                              setConfig(c => ({
+                                ...c,
+                                providers: {
+                                  ...c.providers,
+                                  [engine]: { ...c.providers?.[engine], model },
+                                },
+                              }));
+                            }}
+                          />
+                        </label>
+                      )}
+                    </fieldset>
+                  ))}
+                <p className="tools-muted">
+                  Google 免 Key 通道为非官方接口，可用性和额度无法保证；DeepL
+                  API Free 需自行申请 Key。OpenAI、Gemini
+                  按各自账号额度或计费规则使用。翻译连接使用当前账号的网络代理。
+                </p>
+                <button type="button" onClick={() => void apply('outgoing')}>
+                  应用并测试发送翻译
+                </button>
+                <button type="button" onClick={() => void apply('incoming')}>
+                  应用并测试接收翻译
+                </button>
                 <p className="tools-info">
                   第一次发送仅替换为译文；请校正后再次发送。翻译失败时保留原文，不发送消息。
                 </p>

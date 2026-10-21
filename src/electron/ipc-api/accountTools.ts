@@ -10,14 +10,32 @@ import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   defaultTools,
+  translationEngines,
+  type TranslationEngine,
   proxyRules,
   type ToolsConfig,
   type SendRecord,
 } from '../../features/accountTools/config';
-import { translateTo } from '../../helpers/translation-helpers';
+import { translateAccount } from '../accountTranslation';
+import { createSocksBridge } from '../socksProxy';
+import { accountTransport } from '../accountTransport';
 import TranslationQueue from '../../features/accountTools/TranslationQueue';
 
-type StoredConfig = ToolsConfig & { encryptedPassword?: string };
+type StoredConfig = ToolsConfig & {
+  encryptedPassword?: string;
+  encryptedKeys?: Partial<Record<TranslationEngine, string>>;
+};
+const decrypt = (value?: string) =>
+  value ? safeStorage.decryptString(Buffer.from(value, 'base64')) : '';
+const encrypt = (value: string) => {
+  if (
+    !safeStorage.isEncryptionAvailable() ||
+    (process.platform === 'linux' &&
+      safeStorage.getSelectedStorageBackend() === 'basic_text')
+  )
+    throw new Error('系统安全存储不可用，不能保存密钥或代理密码');
+  return safeStorage.encryptString(value).toString('base64');
+};
 export default ({ mainWindow }: { mainWindow: BrowserWindow }) => {
   const path = join(app.getPath('userData'), 'account-tools.json');
   const translations = new TranslationQueue();
@@ -62,16 +80,62 @@ export default ({ mainWindow }: { mainWindow: BrowserWindow }) => {
         hasPassword: Boolean(c.encryptedPassword),
       },
       translation: c.translation,
+      providers: Object.fromEntries(
+        translationEngines.map(engine => [
+          engine,
+          {
+            model: c.providers?.[engine]?.model,
+            hasApiKey: Boolean(c.encryptedKeys?.[engine]),
+          },
+        ]),
+      ),
     };
   };
+  const bridges = new Map<
+    string,
+    Awaited<ReturnType<typeof createSocksBridge>>
+  >();
+  app.on('before-quit', () => {
+    for (const bridge of bridges.values()) bridge.close();
+    bridges.clear();
+  });
   const prepared = new Map<string, Promise<void>>();
-  const apply = (id: string, config: ToolsConfig) => {
+  const apply = (id: string, config: StoredConfig) => {
     const pending = (prepared.get(id) ?? Promise.resolve())
       .catch(() => {})
       .then(async () => {
         const s = session.fromPartition(`persist:service-${id}`);
-        await s.setProxy(proxyRules(config.proxy));
-        await s.closeAllConnections();
+        // acceptLanguages also applies to WhatsApp login/new account pages.
+        if (typeof s.setUserAgent === 'function')
+          s.setUserAgent(s.getUserAgent(), 'zh-CN,zh,en-US,en');
+        let rules = proxyRules(config.proxy);
+        let bridge: Awaited<ReturnType<typeof createSocksBridge>> | undefined;
+        if (
+          config.proxy.enabled &&
+          config.proxy.mode === 'manual' &&
+          config.proxy.protocol === 'socks5' &&
+          (config.proxy.username || config.encryptedPassword)
+        ) {
+          bridge = await createSocksBridge(
+            config.proxy,
+            decrypt(config.encryptedPassword),
+          );
+          rules = {
+            mode: 'fixed_servers',
+            proxyRules: `http://127.0.0.1:${bridge.port}`,
+            proxyBypassRules: '<-loopback>',
+          };
+        }
+        try {
+          await s.setProxy(rules);
+          await s.closeAllConnections();
+        } catch (error) {
+          bridge?.close();
+          throw error;
+        }
+        bridges.get(id)?.close();
+        bridges.delete(id);
+        if (bridge) bridges.set(id, bridge);
       });
     prepared.set(id, pending);
     return pending;
@@ -138,10 +202,8 @@ export default ({ mainWindow }: { mainWindow: BrowserWindow }) => {
       const previous = get(id);
       proxyRules(input.proxy);
       if (
-        !['Google', 'LibreTranslate'].includes(input.translation.engine) ||
-        !['Google', 'LibreTranslate'].includes(
-          input.translation.receiveEngine,
-        ) ||
+        !translationEngines.includes(input.translation.engine) ||
+        !translationEngines.includes(input.translation.receiveEngine) ||
         ![
           input.translation.source,
           input.translation.receiveSource,
@@ -151,22 +213,50 @@ export default ({ mainWindow }: { mainWindow: BrowserWindow }) => {
       )
         throw new Error('无效的翻译配置');
       let { encryptedPassword } = previous;
-      if (input.proxy.password !== undefined) {
-        if (input.proxy.password) {
-          if (
-            !safeStorage.isEncryptionAvailable() ||
-            (process.platform === 'linux' &&
-              safeStorage.getSelectedStorageBackend() === 'basic_text')
-          )
-            throw new Error('系统安全存储不可用，不能保存代理密码');
-          encryptedPassword = safeStorage
-            .encryptString(input.proxy.password)
-            .toString('base64');
-        } else encryptedPassword = undefined;
+      if (input.proxy.password !== undefined)
+        encryptedPassword = input.proxy.password
+          ? encrypt(input.proxy.password)
+          : undefined;
+      const encryptedKeys = { ...previous.encryptedKeys };
+      const providers: ToolsConfig['providers'] = {};
+      for (const engine of translationEngines) {
+        const credential = input.providers?.[engine];
+        if (credential?.apiKey !== undefined)
+          encryptedKeys[engine] = credential.apiKey
+            ? encrypt(credential.apiKey.trim())
+            : undefined;
+        const model =
+          credential?.model ?? previous.providers?.[engine]?.model ?? '';
+        if (
+          typeof model !== 'string' ||
+          model.length > 100 ||
+          (model && !/^[\w.-]+$/.test(model))
+        )
+          throw new Error('模型名称无效');
+        providers[engine] = { model };
       }
+      // Build an explicit allow-list: no plaintext credential can enter persistent JSON.
       const config: StoredConfig = {
-        ...input,
-        proxy: { ...input.proxy, password: undefined, hasPassword: undefined },
+        proxy: {
+          enabled: Boolean(input.proxy.enabled),
+          mode: input.proxy.mode,
+          protocol: input.proxy.protocol,
+          host: input.proxy.host.trim(),
+          port: input.proxy.port.trim(),
+          username: input.proxy.username,
+        },
+        translation: {
+          outgoing: Boolean(input.translation.outgoing),
+          incoming: Boolean(input.translation.incoming),
+          engine: input.translation.engine,
+          receiveEngine: input.translation.receiveEngine,
+          source: input.translation.source,
+          receiveSource: input.translation.receiveSource,
+          sendTarget: input.translation.sendTarget,
+          receiveTarget: input.translation.receiveTarget,
+        },
+        providers,
+        encryptedKeys,
         encryptedPassword,
       };
       const old = previous;
@@ -201,9 +291,11 @@ export default ({ mainWindow }: { mainWindow: BrowserWindow }) => {
       !/^(PROXY|HTTPS|SOCKS)/.test(route)
     )
       throw new Error('当前会话未使用配置的代理');
-    const response = await s.fetch('https://web.whatsapp.com/', {
+    const config = get(id);
+    const response = await accountTransport(s, config.proxy, () =>
+      decrypt(config.encryptedPassword),
+    )('https://web.whatsapp.com/', {
       method: 'HEAD',
-      bypassCustomProtocolHandlers: true,
       signal: AbortSignal.timeout(12_000),
       cache: 'no-store',
     });
@@ -234,13 +326,48 @@ export default ({ mainWindow }: { mainWindow: BrowserWindow }) => {
           !get(id).translation[direction]
         )
           return { text: '', error: true };
-        return translateTo(
+        await (prepared.has(id) ? prepared.get(id) : apply(id, get(id)));
+        const engine = direction === 'incoming' ? t.receiveEngine : t.engine;
+        const config = get(id);
+        const s = session.fromPartition(`persist:service-${id}`);
+        return translateAccount(
+          accountTransport(s, config.proxy, () =>
+            decrypt(config.encryptedPassword),
+          ),
           text,
           direction === 'incoming' ? t.receiveTarget : t.sendTarget,
-          direction === 'incoming' ? t.receiveEngine : t.engine,
+          engine,
           direction === 'incoming' ? t.receiveSource : t.source,
+          decrypt(config.encryptedKeys?.[engine]),
+          config.providers?.[engine]?.model,
         );
       });
+    },
+  );
+  ipcMain.handle(
+    'account-tools-test-translation',
+    async (event, id: string, direction: 'incoming' | 'outgoing') => {
+      check(event, id);
+      if (!['incoming', 'outgoing'].includes(direction))
+        throw new Error('无效翻译方向');
+      const config = get(id);
+      const t = config.translation;
+      const engine = direction === 'incoming' ? t.receiveEngine : t.engine;
+      await (prepared.has(id) ? prepared.get(id) : apply(id, config));
+      const s = session.fromPartition(`persist:service-${id}`);
+      return translations.enqueue(id, true, () =>
+        translateAccount(
+          accountTransport(s, config.proxy, () =>
+            decrypt(config.encryptedPassword),
+          ),
+          'Hello, this is a translation connection test.',
+          direction === 'incoming' ? t.receiveTarget : t.sendTarget,
+          engine,
+          'en',
+          decrypt(config.encryptedKeys?.[engine]),
+          config.providers?.[engine]?.model,
+        ),
+      );
     },
   );
   ipcMain.handle('account-tools-history', (event, record?: SendRecord) => {

@@ -42,7 +42,7 @@ describe('per-account proxy configuration', () => {
       ).toThrow();
     },
   );
-  it('rejects injected rules and unsupported authenticated SOCKS5', () => {
+  it('rejects injected rules and accepts bridge-supported authenticated SOCKS5', () => {
     expect(() =>
       proxyRules({
         ...defaultTools().proxy,
@@ -60,7 +60,7 @@ describe('per-account proxy configuration', () => {
         protocol: 'socks5',
         username: 'test',
       }),
-    ).toThrow('不支持');
+    ).not.toThrow();
   });
   it('parses credentials, IPv6 and URL encoded passwords without losing colons', () => {
     expect(parseProxy('localhost:8080:user:pass:extra')).toMatchObject({

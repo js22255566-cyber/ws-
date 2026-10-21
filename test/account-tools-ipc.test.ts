@@ -12,6 +12,7 @@ describe('privileged account tools IPC', () => {
   let safeStorage: any;
   let event: any;
   let login: any;
+  let beforeQuit: () => void;
   const invoke = (name: string, ...args: any[]) =>
     handlers[`account-tools-${name}`](event, ...args);
   beforeEach(() => {
@@ -34,8 +35,9 @@ describe('privileged account tools IPC', () => {
     jest.doMock('electron', () => ({
       app: {
         getPath: () => root,
-        on: (_name: string, fn: any) => {
-          login = fn;
+        on: (name: string, fn: any) => {
+          if (name === 'login') login = fn;
+          if (name === 'before-quit') beforeQuit = fn;
         },
       },
       ipcMain: {
@@ -57,8 +59,8 @@ describe('privileged account tools IPC', () => {
         },
       },
     }));
-    jest.doMock('../src/helpers/translation-helpers', () => ({
-      translateTo: jest
+    jest.doMock('../src/electron/accountTranslation', () => ({
+      translateAccount: jest
         .fn()
         .mockResolvedValue({ text: 'translated', error: false }),
     }));
@@ -66,8 +68,9 @@ describe('privileged account tools IPC', () => {
     init({ mainWindow });
   });
   afterEach(() => {
+    beforeQuit?.();
     jest.dontMock('electron');
-    jest.dontMock('../src/helpers/translation-helpers');
+    jest.dontMock('../src/electron/accountTranslation');
     rmSync(root, { recursive: true, force: true });
   });
   it('rejects webview/subframe IPC access and path-like identifiers', () => {
@@ -100,6 +103,32 @@ describe('privileged account tools IPC', () => {
     config.proxy.enabled = false;
     await invoke('save', 'account-1', config);
     expect(first.setProxy).toHaveBeenLastCalledWith({ mode: 'direct' });
+  });
+  it('allocates distinct authenticated SOCKS bridges per account and releases only the disabled account', async () => {
+    const c = defaultTools();
+    c.proxy = {
+      ...c.proxy,
+      enabled: true,
+      protocol: 'socks5',
+      host: '127.0.0.1',
+      port: '9',
+      username: 'synthetic',
+      password: 'synthetic-secret',
+    };
+    await invoke('save', 'account-1', c);
+    await invoke('save', 'account-2', c);
+    const first = sessions.get('persist:service-account-1');
+    const second = sessions.get('persist:service-account-2');
+    const a = first.setProxy.mock.calls.at(-1)[0];
+    const b = second.setProxy.mock.calls.at(-1)[0];
+    expect(a.proxyRules).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
+    expect(a.proxyRules).not.toBe(b.proxyRules);
+    c.proxy.enabled = false;
+    await invoke('save', 'account-1', c);
+    expect(first.setProxy).toHaveBeenLastCalledWith({ mode: 'direct' });
+    expect(second.setProxy).toHaveBeenCalledTimes(1);
+    const saved = await invoke('get', 'account-2');
+    expect(saved.proxy.password).toBeUndefined();
   });
   it('stores only encrypted passwords, redacts read results and matches proxy authentication to the account Session', async () => {
     const config = defaultTools();
@@ -157,8 +186,16 @@ describe('privileged account tools IPC', () => {
       error: false,
     });
     expect(
-      require('../src/helpers/translation-helpers').translateTo,
-    ).toHaveBeenCalledWith('hola', 'en', 'Google', 'es');
+      require('../src/electron/accountTranslation').translateAccount,
+    ).toHaveBeenCalledWith(
+      expect.any(Function),
+      'hola',
+      'en',
+      'Google',
+      'es',
+      '',
+      '',
+    );
   });
   it('uses independent incoming translation provider, source and target settings', async () => {
     const c = defaultTools();
@@ -169,8 +206,16 @@ describe('privileged account tools IPC', () => {
     await invoke('save', 'account-1', c);
     await invoke('translate', 'account-1', 'hello', 'incoming');
     expect(
-      require('../src/helpers/translation-helpers').translateTo,
-    ).toHaveBeenCalledWith('hello', 'fr', 'LibreTranslate', 'en');
+      require('../src/electron/accountTranslation').translateAccount,
+    ).toHaveBeenCalledWith(
+      expect.any(Function),
+      'hello',
+      'fr',
+      'LibreTranslate',
+      'en',
+      '',
+      '',
+    );
   });
   it('does not claim proxy success after a direct-route fallback', async () => {
     const c = defaultTools();
@@ -180,6 +225,25 @@ describe('privileged account tools IPC', () => {
     expect(
       sessions.get('persist:service-account-1').fetch,
     ).not.toHaveBeenCalled();
+  });
+  it('encrypts and redacts API keys, preserves saved keys on blank UI, and supports clearing them', async () => {
+    const c = defaultTools();
+    c.providers = {
+      OpenAI: { apiKey: 'synthetic-provider-key', model: 'gpt-4.1-mini' },
+    };
+    const saved = await invoke('save', 'account-1', c);
+    expect(saved.providers.OpenAI).toEqual({
+      model: 'gpt-4.1-mini',
+      hasApiKey: true,
+    });
+    expect(
+      readFileSync(join(root, 'account-tools.json'), 'utf8'),
+    ).not.toContain('synthetic-provider-key');
+    const preserved = await invoke('save', 'account-1', saved);
+    expect(preserved.providers.OpenAI.hasApiKey).toBe(true);
+    preserved.providers.OpenAI.apiKey = '';
+    const cleared = await invoke('save', 'account-1', preserved);
+    expect(cleared.providers.OpenAI.hasApiKey).toBe(false);
   });
   it('deleting an account removes its stored credential/configuration', async () => {
     await invoke('save', 'account-1', defaultTools());

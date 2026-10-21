@@ -61,6 +61,9 @@ import { darkThemeGrayDarkest } from './themes/legacy';
 
 const debug = require('./preload-safe-debug')('Ferdium:App');
 
+// Default web content and Chromium login pages to Simplified Chinese.
+app.commandLine.appendSwitch('lang', 'zh-CN');
+
 // Globally set useragent to fix user agent override in service workers
 debug('Set userAgent to ', userAgent());
 app.userAgentFallback = userAgent();

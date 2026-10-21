@@ -797,7 +797,7 @@ export default class AppStore extends TypedStore {
 
   _getDefaultLocale() {
     return getLocale({
-      locale: ferdiumLocale,
+      locale: this.stores.settings.app.locale || DEFAULT_APP_SETTINGS.locale,
       locales,
       fallbackLocale: DEFAULT_APP_SETTINGS.fallbackLocale,
     });

@@ -9,11 +9,24 @@ export interface ProxyConfig {
   password?: string;
   hasPassword?: boolean;
 }
+export const translationEngines = [
+  'Google',
+  'DeepL',
+  'OpenAI',
+  'Gemini',
+  'LibreTranslate',
+] as const;
+export type TranslationEngine = (typeof translationEngines)[number];
+export interface ProviderCredential {
+  apiKey?: string;
+  hasApiKey?: boolean;
+  model?: string;
+}
 export interface TranslationConfig {
   outgoing: boolean;
   incoming: boolean;
-  engine: 'Google' | 'LibreTranslate';
-  receiveEngine: 'Google' | 'LibreTranslate';
+  engine: TranslationEngine;
+  receiveEngine: TranslationEngine;
   receiveSource: string;
   source: string;
   sendTarget: string;
@@ -22,6 +35,7 @@ export interface TranslationConfig {
 export interface ToolsConfig {
   proxy: ProxyConfig;
   translation: TranslationConfig;
+  providers?: Partial<Record<TranslationEngine, ProviderCredential>>;
 }
 export const defaultTools = (): ToolsConfig => ({
   proxy: {
@@ -54,13 +68,6 @@ export function proxyRules(proxy: ProxyConfig): Electron.ProxyConfig {
     Number(proxy.port) > 65_535
   )
     throw new Error('请输入有效的代理主机和端口（1–65535）');
-  if (
-    proxy.protocol === 'socks5' &&
-    (proxy.username || proxy.password || proxy.hasPassword)
-  )
-    throw new Error(
-      'Chromium 不支持 SOCKS5 用户名密码认证，请使用无认证 SOCKS5 或 HTTP/HTTPS 代理',
-    );
   return {
     mode: 'fixed_servers',
     proxyRules: `${proxy.protocol}://${proxy.host}:${proxy.port}`,

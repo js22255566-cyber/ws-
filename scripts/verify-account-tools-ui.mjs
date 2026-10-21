@@ -39,6 +39,7 @@ execFileSync(
 );
 const ids = [];
 let mainPatched = false;
+let sidebarBefore;
 const vm = async code =>
   evaluate(
     `require('@electron/remote').require('node:vm').runInThisContext(${JSON.stringify(code)})`,
@@ -71,11 +72,16 @@ try {
     false,
     'Use an isolated test profile with no enabled real accounts',
   );
+  sidebarBefore = await evaluate(
+    'JSON.parse(JSON.stringify(window.ferdium.stores.settings.app.accountSidebar || {}))',
+  );
+  if (await evaluate('!!document.querySelector(".account-dialog")'))
+    await clickText('取消');
   const before = await evaluate(
     'window.ferdium.stores.services.all.map(s=>s.id)',
   );
   await vm(
-    `globalThis.__zlToolsFetch = globalThis.fetch;globalThis.fetch=async(url,options)=>{if(String(url).startsWith('https://translate.google.')){if(globalThis.__zlTranslateFail) throw Error('synthetic translation failure');await new Promise(r=>setTimeout(r,350));return new Response(JSON.stringify({sentences:[{trans:new URLSearchParams(options.body).get('tl')==='zh-CN'?'你好，这是本地测试消息。':'Hello translated'}],src:'zh-CN'}),{status:200,headers:{'Content-Type':'application/json'}})}return globalThis.__zlToolsFetch(url,options)};true`,
+    `globalThis.__zlSessionPrototype = Object.getPrototypeOf(process.getBuiltinModule('module').createRequire(process.cwd()+'/package.json')('electron').session.defaultSession);globalThis.__zlToolsFetch=globalThis.__zlSessionPrototype.fetch;globalThis.__zlSessionPrototype.fetch=async function(url,options){if(String(url).startsWith('https://translate.googleapis.com/')){if(globalThis.__zlTranslateFail) throw Error('synthetic translation failure');await new Promise(r=>setTimeout(r,350));return new Response(JSON.stringify([[[new URLSearchParams(options.body).get('tl')==='zh-CN'?'你好，这是本地测试消息。':'Hello translated']]]),{status:200,headers:{'Content-Type':'application/json'}})}return globalThis.__zlToolsFetch.call(this,url,options)};true`,
   );
   mainPatched = true;
   for (let i = 0; i < 2; i += 1) {
@@ -109,6 +115,51 @@ try {
   }
   const [first, second] = ids;
   await click(`[data-service-id="${first}"] .account-card__select`);
+  // Use native mouse/keyboard input and screen coordinates: DOM-only clicks
+  // cannot catch a focus sentinel pushing the whole dialog off-screen.
+  const typeInVisibleDialog = async text => {
+    await wait(
+      '!!document.querySelector(".account-dialog input")',
+      'dialog input',
+    );
+    const rect = await evaluate(
+      `(()=>{const n=document.querySelector('.account-dialog input');const r=n.getBoundingClientRect();if(r.top<0||r.bottom>innerHeight||r.width<50||r.height<15)throw Error('Dialog input is offscreen');const at=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);if(at!==n)throw Error('Dialog input is covered');return r.toJSON()})()`,
+    );
+    await call('Input.dispatchMouseEvent', {
+      type: 'mousePressed',
+      x: rect.x + rect.width / 2,
+      y: rect.y + rect.height / 2,
+      button: 'left',
+      clickCount: 1,
+    });
+    await call('Input.dispatchMouseEvent', {
+      type: 'mouseReleased',
+      x: rect.x + rect.width / 2,
+      y: rect.y + rect.height / 2,
+      button: 'left',
+      clickCount: 1,
+    });
+    await call('Input.insertText', { text });
+    assert.equal(await evaluate('document.activeElement.value'), text);
+  };
+  await click('.account-sidebar__new-group');
+  await typeInVisibleDialog('GUI测试分组');
+  await clickText('保存');
+  await wait(
+    '!document.querySelector(".account-dialog") && [...document.querySelectorAll(".account-group")].some(n=>n.textContent.includes("GUI测试分组"))',
+    'new group saved',
+  );
+  await click(`[data-service-id="${first}"] .account-card__remark`);
+  await typeInVisibleDialog('GUI测试备注');
+  await clickText('保存');
+  await wait(
+    `!document.querySelector('.account-dialog') && document.querySelector('[data-service-id="${first}"] .account-card__remark').textContent.includes('GUI测试备注')`,
+    'remark saved',
+  );
+  await shot('/workspace/ZL-WA-dialog-regression.png');
+  console.log(
+    'PASS visible group/remark dialogs accept native mouse and text input and persist changes',
+  );
   await clickText('译翻译');
   await wait(
     `!!document.querySelector('.account-tools-panel fieldset')`,
@@ -397,10 +448,19 @@ try {
   console.error(error);
   process.exitCode = 1;
 } finally {
+  if (sidebarBefore) {
+    try {
+      await evaluate(
+        `window.ferdium.stores.settings._update({type:'app',data:{accountSidebar:${JSON.stringify(sidebarBefore)}}})`,
+      );
+    } catch {
+      /* Keep diagnostic failure visible. */
+    }
+  }
   if (mainPatched)
     try {
       await vm(
-        `globalThis.fetch=globalThis.__zlToolsFetch;delete globalThis.__zlToolsFetch;delete globalThis.__zlTranslateFail;globalThis.__zlProxyTLS?.closeAllConnections();globalThis.__zlProxyTLS?.close();globalThis.__zlProxyServer?.closeAllConnections();globalThis.__zlProxyServer?.close();true`,
+        `globalThis.__zlSessionPrototype.fetch=globalThis.__zlToolsFetch;delete globalThis.__zlSessionPrototype;delete globalThis.__zlToolsFetch;delete globalThis.__zlTranslateFail;globalThis.__zlProxyTLS?.closeAllConnections();globalThis.__zlProxyTLS?.close();globalThis.__zlProxyServer?.closeAllConnections();globalThis.__zlProxyServer?.close();true`,
       );
     } catch {
       /* A failed app connection may already have closed; fixtures remain isolated. */
