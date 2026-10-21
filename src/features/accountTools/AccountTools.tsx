@@ -1,5 +1,5 @@
 /* eslint-disable no-void -- UI event handlers start internally handled asynchronous operations. */
-import { ipcRenderer } from 'electron';
+import { ipcRenderer, clipboard } from 'electron';
 import { observer } from 'mobx-react';
 import { useEffect, useState, useId } from 'react';
 import type { StoresProps } from '../../@types/ferdium-components.types';
@@ -17,6 +17,7 @@ import {
   startTranslations,
 } from './runtime';
 import BulkSend from './BulkSend';
+import { translationDiagnostics } from './guest';
 
 export const languages = [
   ['auto', '自动识别'],
@@ -95,6 +96,7 @@ const SettingsPanel = observer(
     const [busy, setBusy] = useState(false);
     const [notice, setNotice] = useState('');
     const [smart, setSmart] = useState('');
+    const [diagnostics, setDiagnostics] = useState('');
     useEffect(() => {
       let cancelled = false;
       if (service)
@@ -123,12 +125,25 @@ const SettingsPanel = observer(
       setConfig(c => ({ ...c, proxy: { ...c.proxy, ...change } }));
     const translation = (change: Partial<ToolsConfig['translation']>) =>
       setConfig(c => ({ ...c, translation: { ...c.translation, ...change } }));
-    const apply = async (test: boolean | 'incoming' | 'outgoing' = false) => {
+    const pageStatus = async () => {
+      if (!service.webview) throw new Error('请先打开已登录的 WhatsApp 聊天');
+      const status = await service.webview.executeJavaScript(
+        `(${translationDiagnostics.toString()})()`,
+      );
+      setDiagnostics(JSON.stringify(status, null, 2));
+      if (!status.enabled) return '接收翻译未开启';
+      const count = status.counts['[data-zl-translate]'];
+      return `已识别 ${count} 条可翻译消息 · 已显示 ${status.translated} 条译文 · 待处理 ${status.pending}${count === 0 ? '；请打开文字聊天，或复制页面诊断反馈' : ''}`;
+    };
+    const apply = async (
+      test: boolean | 'incoming' | 'outgoing' = false,
+      input = config,
+    ) => {
       setBusy(true);
       setNotice('');
       try {
         const old = await getTools(service.id);
-        const saved = await saveTools(service.id, config);
+        const saved = await saveTools(service.id, input);
         setConfig(saved);
         if (panel === 'translation') await configureTranslation(service);
         if (JSON.stringify(old.proxy) !== JSON.stringify(saved.proxy))
@@ -150,12 +165,32 @@ const SettingsPanel = observer(
             service.id,
           );
           setNotice(`连接成功 · ${result.milliseconds}ms · ${result.route}`);
-        } else setNotice('已应用到此账号');
+        } else
+          setNotice(
+            panel === 'translation'
+              ? `已应用到此账号 · ${await pageStatus()}`
+              : '已应用到此账号',
+          );
       } catch (error) {
+        if (input !== config) {
+          const saved = await getTools(service.id);
+          setConfig(current => ({
+            ...current,
+            translation: saved.translation,
+          }));
+        }
         setNotice(String(error instanceof Error ? error.message : error));
       } finally {
         setBusy(false);
       }
+    };
+    const toggleTranslation = (change: Partial<ToolsConfig['translation']>) => {
+      const next = {
+        ...config,
+        translation: { ...config.translation, ...change },
+      };
+      setConfig(next);
+      void apply(false, next);
     };
     return (
       <section
@@ -305,7 +340,7 @@ const SettingsPanel = observer(
                 <Switch
                   label="发送自动翻译"
                   value={config.translation.outgoing}
-                  onChange={outgoing => translation({ outgoing })}
+                  onChange={outgoing => toggleTranslation({ outgoing })}
                 />
                 <label htmlFor="zl-AccountTools-10">
                   发送翻译通道
@@ -346,7 +381,7 @@ const SettingsPanel = observer(
                   label="接收翻译（收发消息）"
                   value={config.translation.incoming}
                   onChange={incoming =>
-                    translation({
+                    toggleTranslation({
                       incoming,
                       ...(incoming ? {} : { preview: false }),
                     })
@@ -356,7 +391,7 @@ const SettingsPanel = observer(
                   label="翻译预览"
                   value={config.translation.preview}
                   onChange={preview =>
-                    translation({
+                    toggleTranslation({
                       preview,
                       ...(preview ? { incoming: true } : {}),
                     })
@@ -511,6 +546,31 @@ const SettingsPanel = observer(
                 <button type="button" onClick={() => void apply('incoming')}>
                   应用并测试接收翻译
                 </button>
+                <p className="tools-muted">
+                  翻译开关立即生效。修改语言、通道或 Key
+                  后请点击应用。纯表情、数字、贴纸和附件不进入文字翻译。
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    void pageStatus()
+                      .then(setNotice)
+                      .catch(error => setNotice(String(error)));
+                  }}
+                >
+                  检查页面识别
+                </button>
+                {diagnostics && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      clipboard.writeText(diagnostics);
+                      setNotice('页面诊断已复制（不包含消息、号码和 API Key）');
+                    }}
+                  >
+                    复制页面诊断
+                  </button>
+                )}
                 <p className="tools-info">
                   第一次发送仅替换为译文；请校正后再次发送。翻译失败时保留原文，不发送消息。
                 </p>

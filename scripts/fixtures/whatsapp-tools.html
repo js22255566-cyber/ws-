@@ -187,9 +187,17 @@
       editor.addEventListener('input', event => {
         if (event.isTrusted) fixture.nativeInputs++;
       });
+      fixture.editorText = () => {
+        const clone = editor.cloneNode(true);
+        clone
+          .querySelectorAll('img[alt]')
+          .forEach(img => img.replaceWith(document.createTextNode(img.alt)));
+        return clone.textContent || '';
+      };
       const send = () => {
-        if (editor.innerText.trim()) {
-          fixture.sent.push(editor.innerText);
+        const text = fixture.editorText();
+        if (text.trim()) {
+          fixture.sent.push(text);
           editor.innerText = '';
           editor.dispatchEvent(new Event('input', { bubbles: true }));
         }

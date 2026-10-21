@@ -9,6 +9,7 @@ const {
 } = require('../build/features/accounts/whatsapp');
 const {
   translationTick,
+  translationDiagnostics,
   listRecipients,
   sendTextToChat,
 } = require('../build/features/accountTools/guest');
@@ -49,6 +50,7 @@ const { defaultTools } = require('../build/features/accountTools/config');
   const receipts = await call(markAllWhatsAppRead);
   assert.equal(receipts.read, 0);
   assert.equal(call(translationTick, [defaultTools().translation]).length, 0);
+  assert.equal(call(translationDiagnostics).enabled, false);
   assert.equal(call(listRecipients).length, 0);
   await assert.rejects(
     call(sendTextToChat, ['unknown@c.us', 'test']),

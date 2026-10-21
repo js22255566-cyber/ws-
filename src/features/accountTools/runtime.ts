@@ -113,6 +113,22 @@ export function startTranslations(stores: RealStores): () => void {
               );
               if (ready) {
                 try {
+                  const modifier =
+                    process.platform === 'darwin' ? 'meta' : 'control';
+                  await view.sendInputEvent({
+                    type: 'keyDown',
+                    keyCode: 'A',
+                    modifiers: [modifier],
+                  });
+                  await view.sendInputEvent({
+                    type: 'keyUp',
+                    keyCode: 'A',
+                    modifiers: [modifier],
+                  });
+                  const selected = await view.executeJavaScript(
+                    `(${translationResult.toString()})(${job.id},${JSON.stringify(job.token)},${JSON.stringify(delivered)},'selected')`,
+                  );
+                  if (!selected) return;
                   await view.insertText(delivered.text);
                   await view.executeJavaScript(
                     `(${translationResult.toString()})(${job.id},${JSON.stringify(job.token)},${JSON.stringify(delivered)},'complete')`,

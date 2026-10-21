@@ -81,7 +81,7 @@ try {
     'window.ferdium.stores.services.all.map(s=>s.id)',
   );
   await vm(
-    `globalThis.__zlSessionPrototype = Object.getPrototypeOf(process.getBuiltinModule('module').createRequire(process.cwd()+'/package.json')('electron').session.defaultSession);globalThis.__zlToolsFetch=globalThis.__zlSessionPrototype.fetch;globalThis.__zlSessionPrototype.fetch=async function(url,options){if(String(url).startsWith('https://translate.googleapis.com/')){globalThis.__zlTranslationCalls=(globalThis.__zlTranslationCalls||0)+1;if(globalThis.__zlTranslateFail) throw Error('synthetic translation failure');await new Promise(r=>setTimeout(r,350));return new Response(JSON.stringify([[[new URLSearchParams(options.body).get('tl')==='zh-CN'?'你好，这是本地测试消息。':'Hello translated']]]),{status:200,headers:{'Content-Type':'application/json'}})}return globalThis.__zlToolsFetch.call(this,url,options)};true`,
+    `globalThis.__zlSessionPrototype = Object.getPrototypeOf(process.getBuiltinModule('module').createRequire(process.cwd()+'/package.json')('electron').session.defaultSession);globalThis.__zlToolsFetch=globalThis.__zlSessionPrototype.fetch;globalThis.__zlSessionPrototype.fetch=async function(url,options){if(String(url).startsWith('https://translate.googleapis.com/')){globalThis.__zlTranslationCalls=(globalThis.__zlTranslationCalls||0)+1;if(globalThis.__zlTranslateFail) throw Error('synthetic translation failure');await new Promise(r=>setTimeout(r,350));return new Response(JSON.stringify([[[new URLSearchParams(options.body).get('tl')==='zh-CN'?'你好，这是本地测试消息。':new URLSearchParams(options.body).get('q')==='你好🐭'?'Hello 🐭':'Hello translated']]]),{status:200,headers:{'Content-Type':'application/json'}})}return globalThis.__zlToolsFetch.call(this,url,options)};true`,
   );
   mainPatched = true;
   for (let i = 0; i < 2; i += 1) {
@@ -210,7 +210,6 @@ try {
     await evaluate(
       `(()=>{const label=[...document.querySelectorAll('.account-tools-panel label')].find(n=>n.textContent.includes(${JSON.stringify(label)}));label.querySelector('input[role="switch"]').click()})()`,
     );
-    await clickText('应用');
     await wait(
       `!document.querySelector('.account-tools-panel fieldset').disabled && document.querySelector('.tools-notice')?.textContent.includes('已应用')`,
       'translation switch applied',
@@ -309,9 +308,12 @@ try {
   console.log(
     'PASS preview auto translates incoming/sent messages, errors retain manual controls, disabled feature removes all controls',
   );
-  await evaluate(
-    `document.querySelectorAll('.account-tools-panel input[role="switch"]').forEach(n=>{if(!n.checked)n.click()})`,
-  );
+  for (const label of ['发送自动翻译', '接收翻译（收发消息）', '翻译预览']) {
+    const checked = await evaluate(
+      `(()=>{const n=[...document.querySelectorAll('.account-tools-panel label')].find(n=>n.textContent.includes(${JSON.stringify(label)}));return n.querySelector('input[role="switch"]').checked})()`,
+    );
+    if (!checked) await switchTranslation(label);
+  }
   await clickText('应用');
   await wait(
     `document.querySelector('.tools-notice')?.textContent.includes('已应用')`,
@@ -330,6 +332,99 @@ try {
     await guest(second, `!!document.querySelector('[data-zl-translation]')`),
     false,
     'other account incoming translation is off',
+  );
+  await guest(
+    first,
+    `(()=>{let i=0;for(const row of document.querySelector('#messages').children){const original=row.querySelector('.selectable-text')?.textContent;if(!original)continue;row.className='';row.dataset.id='opaque-message-'+(++i);row.replaceChildren();const body=document.createElement('div');body.dataset.prePlainText='synthetic';const text=document.createElement('span');text.dir='auto';text.textContent=original;body.append(text);row.append(body)}return true})()`,
+  );
+  await wait(
+    `${service(first)}.webview.executeJavaScript('document.querySelectorAll("[data-zl-translate]").length').then(n=>n===3)`,
+    'semantic message markers without old classes',
+  );
+  await wait(
+    `${service(first)}.webview.executeJavaScript('[...document.querySelectorAll("[data-zl-translation-text]")].every(n=>n.textContent.includes("你好"))')`,
+    'semantic preview text',
+  );
+  assert.equal(
+    await guest(
+      first,
+      'document.querySelectorAll("#messages .message-in, #messages .message-out, #messages .selectable-text, #messages .copyable-text").length',
+    ),
+    0,
+  );
+  console.log(
+    'PASS message recognition works without message-in/out, copyable/selectable classes or true_/false_ IDs',
+  );
+  await clickText('检查页面识别');
+  await wait(
+    `document.querySelector('.tools-notice')?.textContent.includes('已识别 3 条')`,
+    'visible page recognition status',
+  );
+  await clickText('复制页面诊断');
+  const report = await evaluate(`require('electron').clipboard.readText()`);
+  assert.equal(JSON.parse(report).version, 5);
+  assert.equal(JSON.parse(report).counts['[data-zl-translate]'], 3);
+  assert(
+    !report.includes('8613800000001') &&
+      !report.includes('你好') &&
+      !report.includes('test-chat'),
+    'diagnostics must omit content and attribute values',
+  );
+  const callsBeforeEmoji = await vm('globalThis.__zlTranslationCalls');
+  for (const value of [
+    '🐭',
+    '👩🏽‍💻',
+    '🇨🇳',
+    '1️⃣',
+    '123',
+    '?!',
+    'https://example.test/path',
+  ]) {
+    await guest(
+      first,
+      `document.querySelector('[contenteditable]').textContent=${JSON.stringify(value)};document.querySelector('footer button').click();true`,
+    );
+    assert.equal(
+      await guest(first, 'fixture.sent.at(-1)'),
+      value,
+      'non-translatable content sends on first click unchanged',
+    );
+  }
+  await guest(
+    first,
+    `document.querySelector('[contenteditable]').innerHTML='<p><span contenteditable="false"><img alt="🐭"></span></p>';document.querySelector('footer button').click();true`,
+  );
+  assert.equal(
+    await guest(first, 'fixture.sent.at(-1)'),
+    '🐭',
+    'decorator image emoji sends once without duplication',
+  );
+  await new Promise(resolve => {
+    setTimeout(resolve, 600);
+  });
+  assert.equal(
+    await vm('globalThis.__zlTranslationCalls'),
+    callsBeforeEmoji,
+    'emoji/numeric/link sends never call translation',
+  );
+  await guest(first, 'fixture.sent=[];true');
+  console.log(
+    'PASS Unicode emoji, ZWJ/flags/keycaps, decorator IMG emoji, numbers and URLs bypass translation unchanged',
+  );
+  await guest(
+    first,
+    `document.querySelector('[contenteditable]').innerHTML='<p>你好<span contenteditable="false"><img alt="🐭"></span></p>';document.querySelector('footer button').click();true`,
+  );
+  await wait(
+    `${service(first)}.webview.executeJavaScript('fixture.editorText()').then(t=>t==='Hello 🐭')`,
+    'mixed emoji native replacement',
+  );
+  assert.equal(await guest(first, 'fixture.sent.length'), 0);
+  await guest(first, `document.querySelector('footer button').click();true`);
+  assert.deepEqual(await guest(first, 'fixture.sent'), ['Hello 🐭']);
+  await guest(first, 'fixture.sent=[];true');
+  console.log(
+    'PASS native select-all replaces text plus noneditable emoji decorator exactly once before confirmed send',
   );
   await guest(
     first,

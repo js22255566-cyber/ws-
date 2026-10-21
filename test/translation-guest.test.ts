@@ -21,6 +21,7 @@ describe('two-phase native editor replacement guards', () => {
     state = {
       token: 'document-1',
       busy: true,
+      readText: (node: any) => node.innerText,
       pending: new Map([
         [
           1,
@@ -113,6 +114,47 @@ describe('two-phase native editor replacement guards', () => {
       { text: 'translation', error: false },
       'complete',
     );
+    expect(state.approved).toBeUndefined();
+  });
+  it('skips writing when the translation is identical to the draft', () => {
+    expect(
+      translationResult(1, 'document-1', {
+        text: 'original draft',
+        error: false,
+      }),
+    ).toBe(false);
+    expect(input.focus).not.toHaveBeenCalled();
+    expect(state.approved).toEqual({ input, chat: 'chat-1' });
+  });
+  it('refuses native insertion unless the entire original rich draft is selected', () => {
+    selection.rangeCount = 1;
+    selection.getRangeAt = () => ({
+      cloneContents: () => ({ innerText: 'partial selection' }),
+    });
+    expect(
+      translationResult(
+        1,
+        'document-1',
+        { text: 'translated text', error: false },
+        'selected',
+      ),
+    ).toBe(false);
+    expect(input.innerText).toBe('original draft');
+    expect(state.approved).toBeUndefined();
+  });
+  it('remembers a failed insertion so repeated sends cannot keep appending translations', () => {
+    input.innerText = 'original draft plus duplicate';
+    translationResult(
+      1,
+      'document-1',
+      { text: 'translated text', error: false },
+      'complete',
+    );
+    expect(state.failedReplacement).toEqual({
+      input,
+      chat: 'chat-1',
+      text: 'original draft plus duplicate',
+    });
     expect(state.approved).toBeUndefined();
   });
   it('retains a clickable retry on failed message preview and hides the button on success', () => {
