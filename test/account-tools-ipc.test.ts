@@ -133,14 +133,19 @@ describe('privileged account tools IPC', () => {
     config.translation.incoming = true;
     await invoke('save', 'account-1', config);
     let release!: () => void;
+    let entered!: () => void;
+    const preparing = new Promise<void>(resolve => {
+      entered = resolve;
+    });
     sessions.get('persist:service-account-1').setProxy.mockImplementationOnce(
       () =>
         new Promise<void>(resolve => {
           release = resolve;
+          entered();
         }),
     );
     const preparation = invoke('prepare', 'account-1');
-    while (!release) await Promise.resolve();
+    await preparing;
     const request = invoke(
       'translate',
       'account-1',
