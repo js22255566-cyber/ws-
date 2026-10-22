@@ -2,6 +2,10 @@
 import { ipcRenderer, clipboard } from 'electron';
 import { observer } from 'mobx-react';
 import { useEffect, useState, useId } from 'react';
+import CustomerPanel, {
+  CustomerRemarkDialog,
+} from '../customers/CustomerPanel';
+import { getCustomerRuntime } from '../customers/runtime';
 import type { StoresProps } from '../../@types/ferdium-components.types';
 import type Service from '../../models/Service';
 import {
@@ -604,11 +608,23 @@ const AccountTools = observer(({ stores }: StoresProps) => {
   const [panel, setPanel] = useState('');
   const [bulk, setBulk] = useState(false);
   useEffect(() => startTranslations(stores), [stores]);
+  const customers = getCustomerRuntime(stores);
+  useEffect(() => {
+    customers.start();
+    return () => customers.dispose();
+  }, [customers]);
   const { active } = stores.services;
   const service = active?.recipe.id === 'whatsapp' ? active : undefined;
   return (
     <aside className="account-tools" aria-label="账号工具">
-      {panel && (
+      {panel === 'customer' && (
+        <CustomerPanel
+          runtime={customers}
+          activeId={service?.id}
+          onClose={() => setPanel('')}
+        />
+      )}
+      {panel && panel !== 'customer' && (
         <SettingsPanel
           key={`${service?.id}-${panel}`}
           service={service}
@@ -616,8 +632,25 @@ const AccountTools = observer(({ stores }: StoresProps) => {
         />
       )}
       <nav className="account-tools-rail">
-        <button type="button" title="收起设置" onClick={() => setPanel('')}>
-          ⇥<span>收起</span>
+        <button
+          type="button"
+          title="客户资料"
+          aria-pressed={panel === 'customer'}
+          onClick={() => setPanel(panel === 'customer' ? '' : 'customer')}
+        >
+          <svg
+            width="26"
+            height="26"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.6"
+            aria-hidden="true"
+          >
+            <circle cx="9" cy="7" r="3" />
+            <path d="M3 20v-3a6 6 0 0 1 12 0v3M17 5h5M17 10h5M18 15h4M18 20h4" />
+          </svg>
+          <span>客户</span>
         </button>
         <button
           type="button"
@@ -638,6 +671,7 @@ const AccountTools = observer(({ stores }: StoresProps) => {
         </button>
       </nav>
       {bulk && <BulkSend stores={stores} onClose={() => setBulk(false)} />}
+      <CustomerRemarkDialog runtime={customers} />
     </aside>
   );
 });

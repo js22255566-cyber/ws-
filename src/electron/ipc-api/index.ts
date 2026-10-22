@@ -2,6 +2,7 @@ import type { BrowserWindow } from 'electron';
 import type TrayIcon from '../../lib/Tray';
 import appIndicator from './appIndicator';
 import accountTools from './accountTools';
+import customers from './customers';
 // eslint-disable-next-line import/no-cycle
 import autoUpdate from './autoUpdate';
 import clipboard from './clipboard';
@@ -21,6 +22,7 @@ export default (params: {
 }) => {
   settings(params);
   accountTools(params);
+  customers(params.mainWindow);
   sessionStorage();
   autoUpdate(params);
   appIndicator(params);

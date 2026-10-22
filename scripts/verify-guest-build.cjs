@@ -16,6 +16,7 @@ const {
 const { defaultTools } = require('../build/features/accountTools/config');
 
 const advanced = require('../build/features/accountTools/bulkGuest');
+const customers = require('../build/features/customers/guest');
 
 (async () => {
   const modules = {
@@ -47,6 +48,12 @@ const advanced = require('../build/features/accountTools/bulkGuest');
   });
   const call = (fn, args = []) =>
     vm.runInContext(`(${fn.toString()})(...${JSON.stringify(args)})`, context);
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(call(customers.readCustomerContext))),
+    { token: 'synthetic-document', owners: ['8613800000001@c.us'] },
+  );
+  context.window.__zlCustomers = { queue: [], data: undefined };
+  assert.equal(call(customers.customerTick).length, 0);
   const snapshot = await call(readWhatsAppSnapshot);
   assert.equal(snapshot.status, 'online');
   const receipts = await call(markAllWhatsAppRead);

@@ -21,10 +21,34 @@
         display: flex;
       }
       #side {
-        width: 130px;
+        width: 220px;
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
         background: #111b21;
         border-right: 1px solid #29363c;
-        padding: 15px;
+        padding: 8px;
+      }
+      #pane-side {
+        flex: 1;
+        min-height: 0;
+        overflow: auto;
+      }
+      .fixture-chat {
+        height: 72px;
+        padding: 14px 4px;
+        border-bottom: 1px solid #29363c;
+        cursor: pointer;
+      }
+      .fixture-title {
+        height: 22px;
+        display: flex;
+        align-items: center;
+      }
+      .fixture-preview {
+        height: 18px;
+        font-size: 12px;
+        color: #9baab3;
       }
       #main {
         flex: 1;
@@ -81,6 +105,7 @@
     <div id="app">
       <div id="side">
         <strong>本地模拟</strong><small>没有登录真实账号</small>
+        <div id="pane-side" role="grid"></div>
       </div>
       <div id="main">
         <header>
@@ -115,7 +140,13 @@
       </div>
     </div>
     <script>
-      window.fixture = { sent: [], bulk: [], fail: false, nativeInputs: 0 };
+      window.fixture = {
+        sent: [],
+        bulk: [],
+        fail: false,
+        nativeInputs: 0,
+        ownPhone: '8613800000001',
+      };
       // Simulate the affected editor: webpage execCommand cannot replace its text.
       document.execCommand = () => false;
       const chats = [
@@ -128,6 +159,38 @@
           name: '测试联系人 B',
         },
       ];
+      fixture.chats = chats;
+      fixture.openChat = id => {
+        const chat = chats.find(c => c.id._serialized === id);
+        const title = document.querySelector('header span');
+        title.dataset.id = id;
+        title.title = chat?.name || id;
+        title.textContent = chat?.name || id;
+      };
+      fixture.renderChats = () => {
+        document.querySelector('#pane-side').replaceChildren(
+          ...chats.map(chat => {
+            const row = document.createElement('div');
+            row.className = 'fixture-chat';
+            row.setAttribute('role', 'row');
+            row.dataset.id = chat.id._serialized;
+            const title = document.createElement('div');
+            title.className = 'fixture-title';
+            title.dataset.testid = 'cell-frame-title';
+            const name = document.createElement('span');
+            name.title = chat.name;
+            name.textContent = chat.name;
+            title.append(name);
+            const preview = document.createElement('div');
+            preview.className = 'fixture-preview';
+            preview.textContent = '原生消息预览';
+            row.append(title, preview);
+            row.onclick = () => fixture.openChat(chat.id._serialized);
+            return row;
+          }),
+        );
+      };
+      fixture.renderChats();
       class MsgKey {
         static async newId() {
           return crypto.randomUUID();
@@ -152,15 +215,23 @@
           },
         },
         WAWebUserPrefsMeUser: {
-          getMaybeMePnUser: () => ({ server: 'c.us', user: '8613800000001' }),
-          getMaybeMeLidUser: () => ({ server: 'lid', user: '10001' }),
+          getMaybeMePnUser: () => ({ server: 'c.us', user: fixture.ownPhone }),
+          getMaybeMeLidUser: () => ({
+            server: 'lid',
+            user: fixture.ownPhone + '9',
+          }),
         },
         WAWebChatGetters: {
-          getActiveChat: () => ({
-            id: {
-              _serialized: document.querySelector('header span').dataset.id,
+          getActiveChat: () =>
+            chats.find(
+              c =>
+                c.id._serialized ===
+                document.querySelector('header span').dataset.id,
+            ) || {
+              id: {
+                _serialized: document.querySelector('header span').dataset.id,
+              },
             },
-          }),
         },
         WAWebMsgKey: MsgKey,
         WAWebWidFactory: { asUserWidOrThrow: x => x },

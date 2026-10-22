@@ -88,6 +88,13 @@ class ServiceWebview extends Component<IProps> {
       if (this.webview?.view !== view) return;
       runInAction(() => {
         service.accountSnapshot = snapshot;
+        if (
+          Number.isFinite(snapshot.unreadMessages) ||
+          snapshot.status === 'logged-out'
+        ) {
+          service.unreadDirectMessageCount = snapshot.unreadMessages ?? 0;
+          service.unreadIndirectMessageCount = 0;
+        }
       });
       const zoom =
         stores?.settings.app.accountSidebar?.accounts[service.id]?.zoom ?? 1;

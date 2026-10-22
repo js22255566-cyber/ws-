@@ -107,6 +107,7 @@ const runEsbuild = async () => {
     'src/features/accounts/whatsapp.ts',
     'src/features/accountTools/guest.ts',
     'src/features/accountTools/bulkGuest.ts',
+    'src/features/customers/guest.ts',
   ];
   const sourceEntries = await glob('./src/**/*.{ts,tsx,js,jsx}');
   const entryPoints = sourceEntries.filter(

@@ -727,7 +727,12 @@ export default class ServicesStore extends TypedStore {
 
   @action _setUnreadMessageCount({ serviceId, count }) {
     const service = this.one(serviceId);
-
+    if (service.recipe.id === 'whatsapp') {
+      service.unreadDirectMessageCount =
+        service.accountSnapshot.unreadMessages ?? 0;
+      service.unreadIndirectMessageCount = 0;
+      return;
+    }
     service.unreadDirectMessageCount = count.direct;
     service.unreadIndirectMessageCount = count.indirect;
   }

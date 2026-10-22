@@ -75,6 +75,39 @@ describe('WhatsApp account adapter', () => {
     expect(snapshot5.phone).toBeUndefined();
   });
 
+  it('counts actual unread messages in unmuted, unarchived groups and private chats only', async () => {
+    modules.WAWebSocketModel = { Socket: { state: 'CONNECTED' } };
+    // eslint-disable-next-line unicorn/consistent-function-scoping -- Local synthetic collection builder.
+    const chat = (server: string, count: number, extra = {}) => ({
+      id: { server },
+      unreadCount: count,
+      ...extra,
+    });
+    modules.WAWebCollections = {
+      Chat: {
+        getModelsArray: () => [
+          chat('c.us', 3),
+          chat('g.us', 4),
+          chat('lid', 2),
+          chat('c.us', 1, { muteExpiration: Date.now() / 1000 - 60 }),
+          chat('g.us', 100, { archive: true }),
+          chat('c.us', 100, { isArchived: true }),
+          chat('g.us', 100, { muteExpiration: -1 }),
+          chat('c.us', 100, { muteExpiration: Date.now() / 1000 + 3600 }),
+          chat('c.us', 100, { isMuted: true }),
+          chat('g.us', 100, { isAutoMuted: true }),
+          chat('newsletter', 100),
+          chat('broadcast', 100),
+          chat('c.us', 100, { isPSA: true }),
+          chat('c.us', -1),
+          chat('g.us', Number.NaN),
+        ],
+      },
+    };
+    const snapshot = await readWhatsAppSnapshot();
+    expect(snapshot.unreadMessages).toBe(10);
+  });
+
   it('sends real read receipts only for unread chats and reports partial failures', async () => {
     const unread = { id: 'a', unreadCount: 3 };
     const manualUnread = { id: 'b', unreadCount: -1 };

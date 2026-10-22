@@ -5,6 +5,7 @@ export interface AccountSnapshot {
   nickname?: string;
   phone?: string;
   avatar?: string;
+  unreadMessages?: number;
 }
 
 export async function readWhatsAppSnapshot(): Promise<AccountSnapshot> {
@@ -108,6 +109,35 @@ export async function readWhatsAppSnapshot(): Promise<AccountSnapshot> {
         ? phone
         : undefined,
     avatar,
+    unreadMessages: (() => {
+      const collection = module('WAWebCollections')?.Chat;
+      const chats = collection?.getModelsArray?.() ?? collection?.models;
+      if (!Array.isArray(chats)) return 0;
+      const now = Date.now() / 1000;
+      let count = 0;
+      for (const chat of chats) {
+        const server =
+          chat.id?.server ||
+          String(chat.id?._serialized || chat.id || '').split('@')[1];
+        const expiration = Number(chat.muteExpiration ?? 0);
+        const muted =
+          chat.isAutoMuted === true ||
+          chat.isMuted === true ||
+          expiration === -1 ||
+          expiration > now;
+        count +=
+          !chat.archive &&
+          !chat.isArchived &&
+          !muted &&
+          !chat.isPSA &&
+          ['c.us', 'lid', 'g.us'].includes(server) &&
+          Number.isFinite(chat.unreadCount) &&
+          chat.unreadCount > 0
+            ? Math.floor(chat.unreadCount)
+            : 0;
+      }
+      return count;
+    })(),
   };
 }
 
