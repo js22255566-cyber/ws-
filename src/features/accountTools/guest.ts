@@ -83,6 +83,8 @@ export function translationTick(
     };
     const sendSelector =
       '[aria-label="Send"], [aria-label="发送"], [data-icon="send"], [data-icon="wds-ic-send-filled"], [data-icon="send-filled"], [data-testid="compose-btn-send"], [data-testid="media-send"]';
+    const documentSelector =
+      '[data-testid="document-preview"], [data-testid="document-thumb"], [data-testid="document-preview-file"], [data-icon="document"], [data-icon="document-filled"], [data-icon^="document-"], [data-icon="wds-ic-document"], [data-icon^="wds-ic-document-"]';
     const visible = (node: HTMLElement) =>
       node.getClientRects().length > 0 &&
       getComputedStyle(node).visibility !== 'hidden' &&
@@ -119,7 +121,7 @@ export function translationTick(
           depth += 1, root = root.parentElement
         ) {
           const media = root.querySelector(
-            'img[src^="blob:"], img[src^="data:image/"], video, canvas, [data-testid="media-preview"], [data-testid="media-editor"]',
+            `img[src^="blob:"], img[src^="data:image/"], video, canvas, [data-testid="media-preview"], [data-testid="media-editor"], ${documentSelector}`,
           );
           if (
             root.querySelector(sendSelector) &&
@@ -148,6 +150,22 @@ export function translationTick(
               node.getAttribute('aria-label'),
               node.querySelector('img')?.getAttribute('src'),
             ]);
+            const files = [
+              ...root.querySelectorAll<HTMLElement>(
+                '[title], [data-filename], [data-testid="document-preview"], [data-testid="document-thumb"]',
+              ),
+            ]
+              .filter(
+                node =>
+                  !node.contains(input) &&
+                  !input.contains(node) &&
+                  !node.closest('button, [role="button"]'),
+              )
+              .map(node => [
+                node.dataset.filename,
+                node.getAttribute('title'),
+                node.dataset.id,
+              ]);
             candidates.push({
               input,
               root,
@@ -155,6 +173,7 @@ export function translationTick(
                 state.mediaRoots.get(root),
                 sources,
                 selected,
+                files,
               ]),
             });
             break;

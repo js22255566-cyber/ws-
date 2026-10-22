@@ -91,6 +91,19 @@ describe('two-phase native editor replacement guards', () => {
     expect(input.focus).not.toHaveBeenCalled();
     expect(state.approved).toBeUndefined();
   });
+  it('does not approve video/file captions after a different attachment becomes active before native replacement completes', () => {
+    state.pending.get(1).context = 'file-A.pdf';
+    input.innerText = 'translated caption';
+    state.contextKey = () => 'file-B.pdf';
+    translationResult(
+      1,
+      'document-1',
+      { text: 'translated caption', error: false },
+      'complete',
+    );
+    expect(state.approved).toBeUndefined();
+    expect(state.busy).toBe(false);
+  });
   it('does not act on a different document or chat', () => {
     expect(
       translationResult(1, 'different-document', {

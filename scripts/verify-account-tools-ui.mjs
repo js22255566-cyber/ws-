@@ -595,6 +595,104 @@ try {
     console.log(
       'PASS media captions translate before send, preserve background drafts, allow corrections and Enter, reject provider failures/media switches, and bypass emoji/empty captions',
     );
+    for (const kind of ['video', 'file']) {
+      const attachmentSendCount = await guest(
+        first,
+        'fixture.mediaSent.length',
+      );
+      await guest(
+        first,
+        `fixture.openMedia('你好',false,${JSON.stringify(kind)});document.querySelector('#fixture-media [role=button]').click();true`,
+      );
+      await wait(
+        `${service(first)}.webview.executeJavaScript("document.querySelector('#fixture-media [contenteditable]')?.textContent").then(t=>t==='Hello translated')`,
+        `${kind} caption translated`,
+      );
+      assert.equal(
+        await guest(first, 'fixture.mediaSent.length'),
+        attachmentSendCount,
+      );
+      await guest(
+        first,
+        `document.querySelector('#fixture-media [contenteditable]').textContent='Hello corrected ${kind}';document.querySelector('#fixture-media [role=button]').click();true`,
+      );
+      assert.equal(
+        await guest(first, 'fixture.mediaSent.at(-1).caption'),
+        `Hello corrected ${kind}`,
+      );
+      assert.equal(await guest(first, 'fixture.mediaSent.at(-1).kind'), kind);
+      await vm('globalThis.__zlTranslateFail=true;true');
+      await guest(
+        first,
+        `fixture.openMedia('发送失败保护说明'+${JSON.stringify(kind)},false,${JSON.stringify(kind)});document.querySelector('#fixture-media [role=button]').click();true`,
+      );
+      await wait(
+        `${service(first)}.webview.executeJavaScript("!window.__zlTranslation.busy && !window.__zlTranslation.approved && document.querySelector('#zl-translation-status')?.textContent.includes('消息尚未发送')")`,
+        `${kind} failure keeps attachment unsent`,
+      );
+      assert.equal(
+        await guest(first, 'fixture.mediaSent.length'),
+        attachmentSendCount + 1,
+      );
+      await vm('globalThis.__zlTranslateFail=false;true');
+      await guest(
+        first,
+        `document.querySelector('#fixture-media').remove();fixture.openMedia('更换附件等待翻译'+${JSON.stringify(kind)},false,${JSON.stringify(kind)});document.querySelector('#fixture-media [role=button]').click();true`,
+      );
+      await wait(
+        `(async()=>await ${service(first)}.webview.executeJavaScript("[...window.__zlTranslation.pending.values()].some(j=>j.direction==='outgoing')"))()`,
+        `${kind} pending before changing attachment`,
+      );
+      await guest(
+        first,
+        kind === 'file'
+          ? `const title=document.querySelector('#fixture-media [title]');title.title='sample-B.pdf';title.textContent='sample-B.pdf';true`
+          : `document.querySelector('#fixture-media video').src='blob:https://web.whatsapp.com/synthetic-video-B';true`,
+      );
+      await wait(
+        `${service(first)}.webview.executeJavaScript("!window.__zlTranslation.busy && document.querySelector('#zl-translation-status')?.textContent.includes('已变化')")`,
+        `${kind} change discards old result`,
+      );
+      assert.equal(
+        await guest(
+          first,
+          `document.querySelector('#fixture-media [contenteditable]').textContent`,
+        ),
+        `更换附件等待翻译${kind}`,
+      );
+      await guest(
+        first,
+        `document.querySelector('#fixture-media').remove();fixture.openMedia('',false,${JSON.stringify(kind)});document.querySelector('#fixture-media [role=button]').click();true`,
+      );
+      assert.equal(await guest(first, 'fixture.mediaSent.at(-1).caption'), '');
+      await guest(
+        first,
+        `fixture.openMedia('🐭',false,${JSON.stringify(kind)});document.querySelector('#fixture-media [role=button]').click();true`,
+      );
+      assert.equal(
+        await guest(first, 'fixture.mediaSent.at(-1).caption'),
+        '🐭',
+      );
+      await guest(
+        first,
+        `fixture.openMedia('你好',true,${JSON.stringify(kind)});document.querySelector('#fixture-media [contenteditable]').dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));true`,
+      );
+      await wait(
+        `${service(first)}.webview.executeJavaScript("document.querySelector('#fixture-media [contenteditable]')?.textContent").then(t=>t==='Hello translated')`,
+        `${kind} Enter previews translation`,
+      );
+      await guest(
+        first,
+        `document.querySelector('#fixture-media [contenteditable]').dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));true`,
+      );
+      assert.equal(
+        await guest(first, 'fixture.mediaSent.at(-1).caption'),
+        'Hello translated',
+      );
+    }
+    console.log(
+      'PASS video and document captions support two-step click/Enter sends, corrections, failure protection, attachment changes, empty captions and emoji',
+    );
     const callsBeforeEmoji = await vm('globalThis.__zlTranslationCalls');
     for (const value of [
       '🐭',
