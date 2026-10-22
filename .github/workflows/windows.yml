@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: 'Existing test release tag; leave empty to build artifacts only'
+        description: 'Existing version tag (e.g. v7.2.5); leave empty for artifacts only'
         required: false
         type: string
 
@@ -25,6 +25,14 @@ jobs:
         with:
           submodules: recursive
           ref: ${{ inputs.release_tag || github.ref }}
+      - name: Validate release version
+        if: inputs.release_tag != ''
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          if ($env:RELEASE_TAG -ne "v$version") { throw 'Release tag must match package.json version.' }
       - uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
@@ -58,18 +66,22 @@ jobs:
           }
           $lines | Set-Content out/SHA256SUMS.txt -Encoding utf8
           Copy-Item docs/ACCOUNT-TOOLS.md out/Windows-testing-guide.md
-      - name: Publish requested test release
+      - name: Publish requested release
         if: inputs.release_tag != ''
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
-          if ($env:RELEASE_TAG -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+-zlwa-test\.[0-9]+$') {
-            throw 'Only an existing ZL-WA test release tag may be published by this workflow.'
+          if ($env:RELEASE_TAG -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$') {
+            throw 'Only a valid existing ZL-WA version tag may be published by this workflow.'
           }
           $files = Get-ChildItem out -Filter *.exe | Select-Object -ExpandProperty FullName
           gh release upload $env:RELEASE_TAG @files out/SHA256SUMS.txt out/Windows-testing-guide.md --repo $env:GITHUB_REPOSITORY --clobber
           if ($LASTEXITCODE -ne 0) { throw 'Release asset upload failed.' }
-          gh release edit $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --draft=false --prerelease
+          if ($env:RELEASE_TAG.Contains('-')) {
+            gh release edit $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --draft=false --prerelease
+          } else {
+            gh release edit $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --draft=false --prerelease=false --latest
+          }
           if ($LASTEXITCODE -ne 0) { throw 'Release publication failed.' }

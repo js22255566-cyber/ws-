@@ -20,7 +20,7 @@ import { updateVersionParse } from '../../helpers/update-helpers';
 import InfoBar from '../ui/InfoBar';
 import ErrorBoundary from '../util/ErrorBoundary';
 
-import { isMac, isSnap, isWindows } from '../../environment';
+import { isMac, isWindows } from '../../environment';
 import Todos from '../../features/todos/containers/TodosScreen';
 import WorkspaceSwitchingIndicator from '../../features/workspaces/components/WorkspaceSwitchingIndicator';
 import AppUpdateInfoBar from '../AppUpdateInfoBar';
@@ -93,6 +93,7 @@ interface IProps extends WrappedComponentProps, WithStylesProps<typeof styles> {
 
 interface IState {
   shouldShowAppUpdateInfoBar: boolean;
+  dismissedUpdateVersion?: string;
   shouldShowServicesUpdatedInfoBar: boolean;
 }
 
@@ -203,14 +204,17 @@ class AppLayout extends Component<PropsWithChildren<IProps>, IState> {
                       {intl.formatMessage(messages.servicesUpdated)}
                     </InfoBar>
                   )}
-                {automaticUpdates &&
-                  (appUpdateIsDownloaded || (isSnap && isUpdateAvailable)) &&
-                  this.state.shouldShowAppUpdateInfoBar && (
+                {(appUpdateIsDownloaded || isUpdateAvailable) &&
+                  (this.state.shouldShowAppUpdateInfoBar ||
+                    this.state.dismissedUpdateVersion !== updateVersion) && (
                     <AppUpdateInfoBar
                       onInstallUpdate={installAppUpdate}
                       updateVersionParsed={updateVersionParse(updateVersion)}
                       onHide={() => {
-                        this.setState({ shouldShowAppUpdateInfoBar: false });
+                        this.setState({
+                          shouldShowAppUpdateInfoBar: false,
+                          dismissedUpdateVersion: updateVersion,
+                        });
                       }}
                     />
                   )}

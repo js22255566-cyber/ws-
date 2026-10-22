@@ -1,0 +1,51 @@
+.zl-updates {
+  line-height: 1.6;
+  [role='status'] {
+    margin: 14px 0;
+    overflow-wrap: anywhere;
+  }
+  .zl-updates-buttons {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 14px;
+    margin: 16px 0;
+  }
+  button {
+    padding: 10px 16px;
+    border: 0;
+    border-radius: 5px;
+    background: #0866ef;
+    color: #fff;
+    cursor: pointer;
+  }
+  button:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+  .zl-updates-help {
+    opacity: 0.75;
+    font-size: 13px;
+  }
+  details {
+    margin-top: 20px;
+    padding: 14px;
+    border: 1px solid #6666;
+    border-radius: 7px;
+  }
+  summary {
+    cursor: pointer;
+  }
+  label {
+    display: block;
+    margin: 12px 0;
+  }
+  input {
+    width: 100%;
+    padding: 10px;
+    color: inherit;
+    background: transparent;
+    border: 1px solid #777;
+    border-radius: 5px;
+  }
+}

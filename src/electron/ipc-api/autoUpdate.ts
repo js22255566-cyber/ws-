@@ -1,92 +1,86 @@
-import { BrowserWindow, ipcMain } from 'electron';
-import { autoUpdater } from 'electron-updater';
-// eslint-disable-next-line import/no-cycle
-import { appEvents } from '../..';
-import { isSnap } from '../../environment';
+/* eslint-disable no-void -- Event checks report their result to the host renderer. */
+import {
+  app,
+  ipcMain,
+  net,
+  safeStorage,
+  shell,
+  type BrowserWindow,
+} from 'electron';
+import { join } from 'node:path';
+import GitHubUpdates from '../GitHubUpdates';
 
-const debug = require('../../preload-safe-debug')('Ferdium:ipcApi:autoUpdate');
-
-export default (params: { mainWindow: BrowserWindow; settings: any }) => {
-  const enableUpdate = Boolean(params.settings.app.get('automaticUpdates'));
-
-  // The following line is a workaround to force the development update. Should only be used for development purposes.
-  // autoUpdater.forceDevUpdateConfig = true;
-
-  if (enableUpdate) {
-    // Disable auto download for snap packages
-    // since the snap store will handle the update.
-    if (isSnap) {
-      autoUpdater.autoDownload = false;
-    }
-
-    ipcMain.on('autoUpdate', (event, args) => {
-      if (enableUpdate) {
-        try {
-          autoUpdater.autoInstallOnAppQuit = false;
-          autoUpdater.allowPrerelease = Boolean(
-            params.settings.app.get('beta'),
-          );
-
-          if (args.action === 'check') {
-            debug('checking for update');
-            autoUpdater.checkForUpdates();
-          } else if (args.action === 'install') {
-            // If the app is a snap, auto-updates are not supported.
-            // The snap store will handle updates, therefore the user should be prompted to update through snap store.
-            if (isSnap) {
-              return;
-            }
-
-            debug('installing update');
-
-            appEvents.emit('install-update');
-
-            const openedWindows = BrowserWindow.getAllWindows();
-            for (const window of openedWindows) window.close();
-
-            autoUpdater.quitAndInstall();
-          }
-        } catch (error) {
-          event.sender.send('autoUpdate', { error });
-        }
-      }
-    });
-
-    autoUpdater.on('update-not-available', () => {
-      debug('update-not-available');
-      params.mainWindow.webContents.send('autoUpdate', { available: false });
-    });
-
-    autoUpdater.on('update-available', event => {
-      debug('update-available');
-
-      if (enableUpdate) {
-        params.mainWindow.webContents.send('autoUpdate', {
-          version: event.version,
-          available: true,
-        });
-      }
-    });
-
-    autoUpdater.on('download-progress', progressObj => {
-      let logMessage = `Download speed: ${progressObj.bytesPerSecond}`;
-      logMessage = `${logMessage} - Downloaded ${progressObj.percent}%`;
-      logMessage = `${logMessage} (${progressObj.transferred}/${progressObj.total})`;
-
-      debug(logMessage);
-    });
-
-    autoUpdater.on('update-downloaded', () => {
-      debug('update-downloaded');
-      params.mainWindow.webContents.send('autoUpdate', { downloaded: true });
-    });
-
-    autoUpdater.on('error', error => {
-      debug('update-error');
-      params.mainWindow.webContents.send('autoUpdate', { error });
-    });
-  } else {
-    autoUpdater.autoInstallOnAppQuit = false;
-    autoUpdater.autoDownload = false;
-  }
+export default ({
+  mainWindow,
+  settings,
+}: {
+  mainWindow: BrowserWindow;
+  settings: any;
+}) => {
+  const updater = new GitHubUpdates({
+    version: app.getVersion(),
+    path: join(app.getPath('userData'), 'github-updates.json'),
+    secrets: {
+      available: () =>
+        safeStorage.isEncryptionAvailable() &&
+        (process.platform !== 'linux' ||
+          safeStorage.getSelectedStorageBackend() !== 'basic_text'),
+      encrypt: value => safeStorage.encryptString(value).toString('base64'),
+      decrypt: value => safeStorage.decryptString(Buffer.from(value, 'base64')),
+    },
+    fetch: (url, options) => net.fetch(url, options),
+    notify: state => {
+      if (!mainWindow.isDestroyed())
+        mainWindow.webContents.send('autoUpdate', state);
+    },
+  });
+  const permitted = (
+    event: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent,
+  ) =>
+    event.sender === mainWindow.webContents &&
+    event.senderFrame === mainWindow.webContents.mainFrame;
+  const check = (event: Electron.IpcMainInvokeEvent) => {
+    if (!permitted(event)) throw new Error('禁止访问更新设置');
+  };
+  ipcMain.handle('zl-updates-state', event => {
+    check(event);
+    return updater.state;
+  });
+  ipcMain.handle('zl-updates-check', event => {
+    check(event);
+    return updater.check(Boolean(settings.app.get('beta')));
+  });
+  ipcMain.handle('zl-updates-config', event => {
+    check(event);
+    return updater.configuration();
+  });
+  ipcMain.handle('zl-updates-token', (event, value) => {
+    check(event);
+    return updater.saveToken(value);
+  });
+  ipcMain.handle('zl-updates-notes', (event, version: string) => {
+    check(event);
+    return updater.notes(version);
+  });
+  ipcMain.handle('zl-updates-open', event => {
+    check(event);
+    return shell.openExternal(updater.releaseUrl());
+  });
+  ipcMain.on('autoUpdate', (event, args) => {
+    if (!permitted(event)) return;
+    if (
+      args?.action === 'check' &&
+      (args.manual || settings.app.get('automaticUpdates'))
+    )
+      void updater.check(Boolean(settings.app.get('beta')));
+    if (args?.action === 'install')
+      void shell.openExternal(updater.releaseUrl()).catch(() => {
+        if (!mainWindow.isDestroyed())
+          mainWindow.webContents.send('autoUpdate', {
+            error: {
+              message: '无法打开浏览器，请在更新设置点击 GitHub 发布页链接',
+            },
+          });
+      });
+  });
 };

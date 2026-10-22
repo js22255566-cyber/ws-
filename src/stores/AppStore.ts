@@ -17,6 +17,7 @@ import {
   makeObservable,
   observable,
   onBecomeObserved,
+  runInAction,
 } from 'mobx';
 import moment from 'moment';
 import ms from 'ms';
@@ -243,43 +244,21 @@ export default class AppStore extends TypedStore {
     }, ms('60m'));
 
     // Check for updates once every 4 hours
-    setInterval(() => this._checkForUpdates(), CHECK_INTERVAL);
+    setInterval(() => this._checkForUpdates({ manual: false }), CHECK_INTERVAL);
     // Check for an update in 30s (need a delay to prevent Squirrel Installer lock file issues)
-    setTimeout(() => this._checkForUpdates(), ms('30s'));
+    setTimeout(() => this._checkForUpdates({ manual: false }), ms('30s'));
     ipcRenderer.on('autoUpdate', (_, data) => {
-      if (this.updateStatus !== this.updateStatusTypes.FAILED) {
-        if (data.available) {
+      runInAction(() => {
+        if (data.checking) this.updateStatus = this.updateStatusTypes.CHECKING;
+        else if (data.error) this.updateStatus = this.updateStatusTypes.FAILED;
+        else if (data.available === true) {
           this.updateVersion = data.version;
           this.updateStatus = this.updateStatusTypes.AVAILABLE;
-          if (isMac && this.stores.settings.app.automaticUpdates) {
+          if (isMac && this.stores.settings.app.automaticUpdates)
             app.dock?.bounce();
-          }
-        }
-
-        if (data.available !== undefined && !data.available) {
+        } else if (data.available === false)
           this.updateStatus = this.updateStatusTypes.NOT_AVAILABLE;
-        }
-
-        if (data.downloaded) {
-          this.updateStatus = this.updateStatusTypes.DOWNLOADED;
-          if (isMac && this.stores.settings.app.automaticUpdates) {
-            app.dock?.bounce();
-          }
-        }
-
-        if (data.error) {
-          if (data.error.message?.startsWith('404')) {
-            this.updateStatus = this.updateStatusTypes.NOT_AVAILABLE;
-            console.warn(
-              'Updater warning: there seems to be unpublished pre-release(s) available on GitHub',
-              data.error,
-            );
-          } else {
-            console.error('Updater error:', data.error);
-            this.updateStatus = this.updateStatusTypes.FAILED;
-          }
-        }
-      }
+      });
     });
 
     // Handle deep linking (ferdium://)
@@ -577,12 +556,16 @@ export default class AppStore extends TypedStore {
     openExternalUrl(new URL(url));
   }
 
-  @action _checkForUpdates() {
-    if (this.isOnline && this.stores.settings.app.automaticUpdates) {
+  @action _checkForUpdates({ manual = true } = {}) {
+    if (
+      this.isOnline &&
+      (manual || this.stores.settings.app.automaticUpdates)
+    ) {
       debug('_checkForUpdates: sending event to autoUpdate:check');
       this.updateStatus = this.updateStatusTypes.CHECKING;
       ipcRenderer.send('autoUpdate', {
         action: 'check',
+        manual,
       });
     }
 

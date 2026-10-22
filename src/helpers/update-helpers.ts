@@ -1,4 +1,4 @@
-import { Octokit } from '@octokit/core';
+import { ipcRenderer } from 'electron';
 import { type IntlShape, defineMessages } from 'react-intl';
 
 export const getFerdiumVersion = (
@@ -43,23 +43,10 @@ export async function getUpdateInfoFromGH(
   ferdiumVersion: string,
   intl: IntlShape,
 ): Promise<string> {
-  const octokit = new Octokit();
   try {
-    const response = await octokit.request(
-      'GET /repos/{owner}/{repo}/releases/tags/{tag}',
-      {
-        owner: 'ferdium',
-        repo: 'ferdium-app',
-        tag: getFerdiumVersion(currentLocation, ferdiumVersion),
-      },
-    );
-
-    if (response.status === 200) {
-      const json = response.data.body;
-      return json || `### ${intl.formatMessage(messages.connectionError)}`;
-    }
-    return `### ${intl.formatMessage(messages.connectionError)}`;
+    const tag = getFerdiumVersion(currentLocation, ferdiumVersion);
+    return await ipcRenderer.invoke('zl-updates-notes', tag.slice(1));
   } catch {
-    return `### ${intl.formatMessage(messages.connectionErrorPageMissing)}`;
+    return `### ${intl.formatMessage(messages.connectionErrorPageMissing)}\n\n请打开 ZL-WA 的 GitHub 发布页查看更新说明；私有仓库需要在更新设置中配置访问权限。`;
   }
 }

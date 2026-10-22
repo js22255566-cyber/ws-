@@ -1,5 +1,5 @@
 import { systemPreferences } from '@electron/remote';
-import { mdiGithub, mdiOpenInNew, mdiPowerPlug } from '@mdi/js';
+import { mdiGithub, mdiOpenInNew } from '@mdi/js';
 import { ipcRenderer } from 'electron';
 import { noop } from 'lodash';
 import { observer } from 'mobx-react';
@@ -11,6 +11,7 @@ import {
   injectIntl,
 } from 'react-intl';
 import tinycolor from 'tinycolor2';
+import GitHubUpdatesPanel from '../../../features/updates/GitHubUpdatesPanel';
 import {
   DEFAULT_ACCENT_COLOR,
   DEFAULT_APP_SETTINGS,
@@ -20,24 +21,15 @@ import {
   SPLIT_COLUMNS_MAX,
   SPLIT_COLUMNS_MIN,
 } from '../../../config';
+import { isMac, isWindows, lockFerdiumShortcutKey } from '../../../environment';
 import {
-  isMac,
-  isSnap,
-  isWinPortable,
-  isWindows,
-  lockFerdiumShortcutKey,
-} from '../../../environment';
-import {
-  ferdiumVersion,
   userDataCertsPath,
   userDataPath,
   userDataRecipesPath,
 } from '../../../environment-remote';
-import { updateVersionParse } from '../../../helpers/update-helpers';
 import { openExternalUrl, openPath } from '../../../helpers/url-helpers';
 import globalMessages from '../../../i18n/globalMessages';
 import type Form from '../../../lib/Form';
-import Infobox from '../../ui/Infobox';
 import Select from '../../ui/Select';
 import Slider from '../../ui/Slider';
 import Button from '../../ui/button';
@@ -149,8 +141,8 @@ const messages = defineMessages({
     defaultMessage: 'Advanced Settings',
   },
   sectionUpdates: {
-    id: 'settings.app.sectionUpdates',
-    defaultMessage: 'App Updates Settings',
+    id: 'settings.app.zlwaUpdates',
+    defaultMessage: 'ZL-WA 更新设置',
   },
   sectionServiceIconsSettings: {
     id: 'settings.app.sectionServiceIconsSettings',
@@ -475,17 +467,11 @@ class EditSettingsForm extends Component<IProps, IState> {
 
   render(): ReactElement {
     const {
-      checkForUpdates,
-      installUpdate,
       form,
-      updateVersion,
-      isCheckingForUpdates,
       isAdaptableDarkModeEnabled,
       isUseGrayscaleServicesEnabled,
       isUpdateAvailable,
-      noUpdateAvailable,
       updateIsReadyToInstall,
-      updateFailed,
       showServicesUpdatedInfoBar,
       isClearingAllCache,
       onClearAllCache,
@@ -496,21 +482,9 @@ class EditSettingsForm extends Component<IProps, IState> {
       isSplitModeEnabled,
       openProcessManager,
       isTodosActivated,
-      isOnline,
       serverURL,
       intl,
     } = this.props;
-
-    const installUpdateMessage = isSnap
-      ? messages.updateAvailableSnap
-      : messages.buttonInstallUpdate;
-
-    let updateButtonLabelMessage = messages.buttonSearchForUpdate;
-    if (isCheckingForUpdates) {
-      updateButtonLabelMessage = messages.updateStatusSearching;
-    } else if (isUpdateAvailable) {
-      updateButtonLabelMessage = messages.updateStatusAvailable;
-    }
 
     const {
       isLockingFeatureEnabled,
@@ -1339,89 +1313,8 @@ class EditSettingsForm extends Component<IProps, IState> {
                 </H2>
 
                 <Toggle {...form.$('automaticUpdates').bind()} />
-                {automaticUpdates && !isWinPortable && (
-                  <>
-                    <>
-                      <div>
-                        <Toggle {...form.$('beta').bind()} />
-                        {updateIsReadyToInstall ||
-                        (isSnap && isUpdateAvailable) ? (
-                          <Button
-                            label={intl.formatMessage(installUpdateMessage)}
-                            onClick={installUpdate}
-                            disabled={isSnap}
-                            buttonType={isSnap ? 'secondary' : undefined}
-                          />
-                        ) : (
-                          <Button
-                            buttonType="secondary"
-                            label={intl.formatMessage(updateButtonLabelMessage)}
-                            onClick={checkForUpdates}
-                            disabled={
-                              !automaticUpdates ||
-                              isCheckingForUpdates ||
-                              isUpdateAvailable ||
-                              !isOnline
-                            }
-                            loaded={!isCheckingForUpdates || !isUpdateAvailable}
-                          />
-                        )}
-                        {(isUpdateAvailable || updateIsReadyToInstall) && (
-                          <Button
-                            className="settings__updates__changelog-button"
-                            label={intl.formatMessage(
-                              messages.buttonShowChangelog,
-                            )}
-                            onClick={() => {
-                              window.location.href = `#/releasenotes${updateVersionParse(
-                                updateVersion,
-                              )}`;
-                            }}
-                          />
-                        )}
-                        <br />
-                        <br />
-                      </div>
-                      <p>
-                        {intl.formatMessage(messages.currentVersion)}{' '}
-                        {ferdiumVersion}
-                      </p>
-                      {noUpdateAvailable && (
-                        <p>
-                          {intl.formatMessage(messages.updateStatusUpToDate)}.
-                        </p>
-                      )}
-                      {updateFailed && (
-                        <Infobox type="danger" icon="alert">
-                          &nbsp;An error occurred (check the console for more
-                          details)
-                        </Infobox>
-                      )}
-                    </>
-                    {showServicesUpdatedInfoBar ? (
-                      <>
-                        <p>
-                          <Icon icon={mdiPowerPlug} />
-                          {intl.formatMessage(messages.servicesUpdated)}
-                        </p>
-                        <Button
-                          label={intl.formatMessage(
-                            messages.buttonReloadServices,
-                          )}
-                          onClick={() => window.location.reload()}
-                        />
-                      </>
-                    ) : (
-                      <p>
-                        <Icon icon={mdiPowerPlug} />
-                        &nbsp;
-                        {intl.formatMessage(
-                          messages.servicesUpdateStatusUpToDate,
-                        )}
-                      </p>
-                    )}
-                  </>
-                )}
+                <Toggle {...form.$('beta').bind()} />
+                <GitHubUpdatesPanel />
                 <p className="settings__message">
                   <Icon icon={mdiGithub} /> Ferdium is based on{' '}
                   <a
