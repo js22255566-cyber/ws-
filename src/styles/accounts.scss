@@ -146,6 +146,16 @@
   }
 }
 .account-card {
+  cursor: grab;
+  &.is-dragging {
+    opacity: 0.5;
+  }
+  &.drop-before {
+    box-shadow: 0 -3px #579dff;
+  }
+  &.drop-after {
+    box-shadow: 0 3px #579dff;
+  }
   position: relative;
   border: 1px solid #353c49;
   border-radius: 8px;

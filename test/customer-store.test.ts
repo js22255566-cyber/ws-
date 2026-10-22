@@ -19,6 +19,17 @@ describe('local WhatsApp customers and unlimited pins', () => {
     store.bind([owner]);
   });
   afterEach(() => rmSync(root, { recursive: true, force: true }));
+  it('persists explicit native unpins and migrates them across contact aliases', () => {
+    store.pin(owner, '30001@lid', 'unpin');
+    store.link(owner, ['30001@lid', '30002@c.us']);
+    expect(new CustomerStore(path).bundle(owner).unpinned).toEqual([
+      '30002@c.us',
+    ]);
+    expect(store.importPins(owner, ['30002@c.us']).pins).toEqual([]);
+    store.pin(owner, '30001@lid', 'pin');
+    expect(new CustomerStore(path).bundle(owner).unpinned).toEqual([]);
+    expect(store.bundle(owner).pins).toEqual(['30002@c.us']);
+  });
   it('imports official pins once, preserves local order and never resurrects unpinned chats', () => {
     store.bind([owner]);
     store.pin(owner, '30001@c.us', 'pin');

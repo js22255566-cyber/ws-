@@ -105,6 +105,9 @@
 // Keep the network indicator beside, rather than over, the window controls.
 .app-titlebar {
   position: relative;
+  // Override the global div height reset; otherwise this wrapper occupies the
+  // entire Windows viewport and pushes the account/chat content off screen.
+  height: 28px;
   flex-shrink: 0;
 }
 .account-network-status {

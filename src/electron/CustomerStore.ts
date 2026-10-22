@@ -12,6 +12,7 @@ interface Account {
   aliases: Record<string, string>;
   pins: string[];
   pinsInitialized?: boolean;
+  unpinned?: string[];
 }
 export function customerId(id: unknown, owner = false): string {
   if (
@@ -96,6 +97,9 @@ export default class CustomerStore {
             target.profiles = { ...old.profiles, ...target.profiles };
             target.aliases = { ...old.aliases, ...target.aliases };
             target.pins = [...new Set([...target.pins, ...old.pins])];
+            target.unpinned = [
+              ...new Set([...(target.unpinned || []), ...(old.unpinned || [])]),
+            ].filter(id => !target.pins.includes(id));
             target.pinsInitialized ||= old.pinsInitialized;
             Reflect.deleteProperty(this.data.accounts, key);
             for (const [alias, canonical] of Object.entries(this.data.owners))
@@ -116,6 +120,7 @@ export default class CustomerStore {
       revision: account.revision,
       pins: [...account.pins],
       pinsInitialized: Boolean(account.pinsInitialized),
+      unpinned: [...(account.unpinned || [])],
       aliases: { ...account.aliases },
       summaries: Object.fromEntries(
         Object.entries(account.profiles).map(([id, p]) => [
@@ -150,6 +155,11 @@ export default class CustomerStore {
         account.aliases[id] = canonical;
         account.pins = [
           ...new Set(account.pins.map(p => (p === oldKey ? canonical : p))),
+        ];
+        account.unpinned = [
+          ...new Set(
+            (account.unpinned || []).map(p => (p === oldKey ? canonical : p)),
+          ),
         ];
       }
       account.revision += 1;
@@ -197,7 +207,9 @@ export default class CustomerStore {
       account.pins = [
         ...new Set([
           ...account.pins,
-          ...ids.map(id => account.aliases[id] || id),
+          ...ids
+            .map(id => account.aliases[id] || id)
+            .filter(id => !account.unpinned?.includes(id)),
         ]),
       ];
       account.pinsInitialized = true;
@@ -219,7 +231,12 @@ export default class CustomerStore {
       const key = a.aliases[id] || id;
       const index = a.pins.indexOf(key);
       if (action === 'pin' && index < 0) a.pins.unshift(key);
-      if (action === 'unpin') a.pins = a.pins.filter(p => p !== key);
+      if (action === 'pin')
+        a.unpinned = (a.unpinned || []).filter(p => p !== key);
+      if (action === 'unpin') {
+        a.pins = a.pins.filter(p => p !== key);
+        a.unpinned = [...new Set([...(a.unpinned || []), key])];
+      }
       const next = action === 'up' ? index - 1 : index + 1;
       if (
         ['up', 'down'].includes(action) &&

@@ -6,9 +6,43 @@ import {
   updateAccount,
   nextZoom,
   serializeAccountConfig,
+  orderedAccountIds,
+  moveAccount,
 } from '../src/features/accounts/state';
 
 describe('local account organization', () => {
+  it('moves cards up or down, persists order and preserves account metadata', () => {
+    const config = normalizeAccountConfig({
+      accounts: {
+        a: { remark: 'keep', zoom: 1.2 },
+        b: {},
+        c: {},
+      },
+    });
+    const moved = moveAccount(config, ['a', 'b', 'c'], 'c', 'a', false);
+    expect(orderedAccountIds(moved, ['a', 'b', 'c'])).toEqual(['c', 'a', 'b']);
+    const restored = normalizeAccountConfig(
+      JSON.parse(JSON.stringify(serializeAccountConfig(moved))),
+    );
+    expect(orderedAccountIds(restored, ['a', 'b', 'c', 'new'])).toEqual([
+      'c',
+      'a',
+      'b',
+      'new',
+    ]);
+    const down = moveAccount(restored, ['a', 'b', 'c'], 'c', 'b', true);
+    expect(orderedAccountIds(down, ['a', 'b', 'c'])).toEqual(['a', 'b', 'c']);
+    expect(down.accounts.a).toMatchObject({ remark: 'keep', zoom: 1.2 });
+    expect(config.accounts.a.order).toBeUndefined();
+  });
+  it('does not reorder across groups or for invalid drag targets', () => {
+    const config = normalizeAccountConfig({
+      groups: [{ id: 'sales', name: '销售', collapsed: false }],
+      accounts: { b: { groupId: 'sales' } },
+    });
+    expect(moveAccount(config, ['a', 'b'], 'a', 'b', false)).toBe(config);
+    expect(moveAccount(config, ['a'], 'missing', 'a', true)).toBe(config);
+  });
   it('serializes observable preferences into values Electron IPC can clone', () => {
     const config = normalizeAccountConfig(
       observable({

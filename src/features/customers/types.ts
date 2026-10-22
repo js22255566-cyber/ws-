@@ -43,6 +43,7 @@ export interface CustomerBundle {
   aliases: Record<string, string>;
   pins: string[];
   pinsInitialized?: boolean;
+  unpinned?: string[];
 }
 export interface CustomerContext {
   token: string;

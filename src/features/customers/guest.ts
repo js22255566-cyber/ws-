@@ -154,7 +154,7 @@ export function customerTick(
     const style = document.createElement('style');
     style.dataset.zlCustomers = 'style';
     style.textContent = `
-      .zl-chat-note{position:absolute;left:0;right:0;width:100%;box-sizing:border-box;line-height:12px;font:11px/12px sans-serif;color:#ff6060;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;z-index:2;height:14px!important;min-height:0!important;padding:0!important;margin:0!important;border:0!important;background:transparent!important;outline:none;cursor:text;-webkit-app-region:no-drag}
+      .zl-chat-note{position:absolute;box-sizing:border-box;line-height:12px;font:11px/12px sans-serif;color:#ff6060;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;z-index:4;height:14px!important;min-height:0!important;padding:0!important;margin:0!important;border:0!important;background:transparent!important;outline:none;cursor:text;pointer-events:auto!important;user-select:text!important;-webkit-user-select:text!important;-webkit-app-region:no-drag}
       .zl-chat-note::placeholder{color:#8a969c}
       .zl-chat-note:focus{box-shadow:0 1px #579dff}
       .zl-chat-note[data-save-state="error"]{box-shadow:0 1px #ff6060}
@@ -164,6 +164,66 @@ export function customerTick(
     `;
     document.head.append(style);
     state.nativePins = new Map();
+    state.setNativePin = (model: any, pin: number) => {
+      if (Number(model.pin || 0) === pin) return;
+      try {
+        model.set?.({ pin });
+      } catch {
+        /* Older native model. */
+      }
+      if (Number(model.pin || 0) !== pin) {
+        try {
+          model.set?.('pin', pin);
+        } catch {
+          /* Property setter fallback. */
+        }
+      }
+      if (Number(model.pin || 0) !== pin) Reflect.set(model, 'pin', pin);
+    };
+    // Intercept before React's capture handlers on the chat list. Native rows
+    // often consume mouse-down before the injected input's bubble listeners.
+    for (const kind of [
+      'pointerdown',
+      'mousedown',
+      'mouseup',
+      'click',
+      'dblclick',
+    ]) {
+      document.addEventListener(
+        kind,
+        event => {
+          const target = event.target as Element;
+          let line = target.closest?.<HTMLInputElement>('.zl-chat-note');
+          if (!line && event instanceof MouseEvent) {
+            const row = target.closest?.(
+              '#pane-side [role="row"], #pane-side [data-testid="cell-frame-container"]',
+            );
+            const candidate =
+              row?.querySelector<HTMLInputElement>('.zl-chat-note');
+            const bounds = candidate?.getBoundingClientRect();
+            if (
+              candidate &&
+              bounds &&
+              event.clientX >= bounds.left &&
+              event.clientX < bounds.right &&
+              event.clientY >= bounds.top &&
+              event.clientY < bounds.bottom
+            )
+              line = candidate;
+          }
+          if (!line) return;
+          event.stopImmediatePropagation();
+          if (kind === 'pointerdown' || kind === 'mousedown') {
+            line.focus({ preventScroll: true });
+            if (target !== line) {
+              event.preventDefault();
+              line.setSelectionRange(line.value.length, line.value.length);
+            }
+          }
+        },
+        true,
+      );
+    }
     const rememberRow = (event: Event) => {
       const target = event.target as Element;
       const row = target.closest?.(
@@ -172,7 +232,7 @@ export function customerTick(
       if (row) state.menuChat = state.resolveRow?.(row) || '';
       else if (
         !target.closest?.(
-          '[role="menu"], [role="menuitem"], [data-animate-dropdown], [data-animate-dropdown-item], [data-testid="mi-pin"], [data-testid="mi-unpin"]',
+          '[role="menu"], [role="menuitem"], [role="button"], [data-animate-dropdown], [data-animate-dropdown-item], [data-testid="mi-pin"], [data-testid="mi-unpin"]',
         )
       )
         state.menuChat = '';
@@ -187,51 +247,54 @@ export function customerTick(
       },
       true,
     );
-    document.addEventListener(
-      'click',
-      event => {
-        const target = event.target as Element;
-        const item = target.closest?.(
-          '[role="menuitem"], [data-testid="mi-pin"], [data-testid="mi-unpin"], [data-animate-dropdown-item], [role="button"]',
-        );
-        if (!item || !state.menuChat || !state.data) return;
-        const text = item.textContent?.trim() || '';
-        const icon =
-          item.querySelector('[data-icon]')?.getAttribute('data-icon') || '';
-        const unpin =
-          /^(unpin chat|取消置顶(?:聊天)?)$/i.test(text) ||
-          /^(unpin|pinned-off|pin-off)$/.test(icon);
-        const pin =
-          /^(pin chat|置顶(?:聊天)?)$/i.test(text) ||
-          /^(pin|pinned)$/.test(icon);
-        if (!pin && !unpin) return;
-        const id = state.menuChat;
-        if (!state.models?.some((m: any) => state.idOf(m) === id)) return;
-        event.preventDefault();
-        event.stopImmediatePropagation();
-        const key = state.data.aliases[id] || id;
-        const remove = state.data.pins.includes(key) || unpin;
-        state.action(id, remove ? 'unpin' : 'pin');
-        // Optimistic local order also prevents a second fast click reversing a
-        // stale menu state before the host has persisted the action.
-        state.data = {
-          ...state.data,
-          pins: remove
-            ? state.data.pins.filter((p: string) => p !== key)
-            : [key, ...state.data.pins.filter((p: string) => p !== key)],
-        };
-        state.dirty = true;
-        item.dispatchEvent(
-          new KeyboardEvent('keydown', {
-            key: 'Escape',
-            code: 'Escape',
-            bubbles: true,
-          }),
-        );
-        state.menuChat = '';
-      },
-      true,
-    );
+    const pinMenuEvent = (event: Event) => {
+      const target = event.target as Element;
+      const item = target.closest?.(
+        '[role="menuitem"], [data-testid="mi-pin"], [data-testid="mi-unpin"], [data-animate-dropdown-item], [role="button"]',
+      );
+      if (!item || !state.menuChat || !state.data) return;
+      const text = item.textContent?.trim() || '';
+      const icon =
+        item.querySelector('[data-icon]')?.getAttribute('data-icon') || '';
+      const unpin =
+        /^(unpin chat|取消置顶(?:聊天)?)$/i.test(text) ||
+        /^(unpin|pinned-off|pin-off)$/.test(icon);
+      const pin =
+        /^(pin chat|置顶(?:聊天)?)$/i.test(text) || /^(pin|pinned)$/.test(icon);
+      if (!pin && !unpin) return;
+      const id = state.menuChat;
+      if (!state.models?.some((m: any) => state.idOf(m) === id)) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      const key = state.data.aliases[id] || id;
+      if (state.handledPinItem === item) return;
+      state.handledPinItem = item;
+      const remove = unpin;
+      state.action(id, remove ? 'unpin' : 'pin');
+      // Optimistic local order also prevents a second fast click reversing a
+      // stale menu state before the host has persisted the action.
+      state.data = {
+        ...state.data,
+        pins: remove
+          ? state.data.pins.filter((p: string) => p !== key)
+          : [key, ...state.data.pins.filter((p: string) => p !== key)],
+        unpinned: remove
+          ? [...new Set([...(state.data.unpinned || []), key])]
+          : (state.data.unpinned || []).filter((p: string) => p !== key),
+      };
+      state.dirty = true;
+      item.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'Escape',
+          code: 'Escape',
+          bubbles: true,
+        }),
+      );
+    };
+    // Match and cancel both pointer/mouse-down and click: relying on click is
+    // too late for native menus that open the three-pin limit dialog on down.
+    for (const kind of ['pointerdown', 'mousedown', 'click'])
+      document.addEventListener(kind, pinMenuEvent, true);
     state.observer = new MutationObserver(changes => {
       if (
         changes.some(
@@ -262,8 +325,7 @@ export function customerTick(
         .forEach(n => n.remove());
       state.editor = undefined;
       for (const [model, pin] of state.nativePins) {
-        if (typeof model.set === 'function') model.set('pin', pin);
-        else model.pin = pin;
+        state.setNativePin(model, pin);
       }
       state.nativePins = new Map();
       state.inlineDrafts.clear();
@@ -319,7 +381,8 @@ export function customerTick(
   // unique exact name, never for two contacts sharing the same display name.
   let models: any[] = [];
   try {
-    const collection = page.require?.('WAWebCollections')?.Chat;
+    const collection =
+      page.require?.('WAWebCollections')?.Chat || page.WPP?.whatsapp?.ChatStore;
     models = collection?.getModelsArray?.() ?? collection?.models ?? [];
   } catch {
     /* Await the native collection. */
@@ -348,11 +411,20 @@ export function customerTick(
       row.querySelector('[data-id]')?.getAttribute('data-id') ||
       '';
     if (models.some(m => idOf(m) === possible)) return possible;
-    const marker = row.querySelector<HTMLElement>(
-      '[title]:not([data-zl-customers]), [data-testid="cell-frame-title"] span',
-    );
-    const name = marker?.getAttribute('title') || marker?.textContent || '';
-    return names.get(name)?.length === 1 ? names.get(name)![0] : '';
+    const markers = [
+      ...row.querySelectorAll<HTMLElement>(
+        '[data-testid="cell-frame-title"] [title], [title]:not([data-zl-customers])',
+      ),
+    ].filter(marker => !marker.closest('[data-zl-customers]'));
+    const ids = [
+      ...new Set(
+        markers.flatMap(marker => {
+          const name = marker.getAttribute('title') || marker.textContent || '';
+          return names.get(name)?.length === 1 ? names.get(name)! : [];
+        }),
+      ),
+    ];
+    return ids.length === 1 ? ids[0] : '';
   };
   // Project local pins onto the native model, so WhatsApp's own collection,
   // virtual list, pin glyph and menu all render the normal pinned-chat state.
@@ -369,13 +441,15 @@ export function customerTick(
   }
   for (const model of models) {
     const index = data.pins.indexOf(canonical(idOf(model)));
+    // Do not erase official pins merely because an old local bundle lacks them.
+    // Only explicit local pins/cancellations may change a native pin value.
+    if (index < 0 && !data.unpinned?.includes(canonical(idOf(model)))) continue;
     if (!state.nativePins.has(model))
       state.nativePins.set(model, model.pin || 0);
     // A fixed base keeps incoming-message timestamps from moving local pins.
     const projected = index < 0 ? 0 : 2_000_000_000 - index;
     if (Number(model.pin || 0) !== projected) {
-      if (typeof model.set === 'function') model.set('pin', projected);
-      else model.pin = projected;
+      state.setNativePin(model, projected);
     }
   }
   if (state.dirty || Date.now() - (state.lastRender || 0) > 2000) {
@@ -393,23 +467,17 @@ export function customerTick(
         const row = candidate.closest<HTMLElement>('[role="row"]') || candidate;
         if (seen.has(row)) continue;
         seen.add(row);
-        const marker = row.querySelector<HTMLElement>(
-          '[title]:not([data-zl-customers]), [data-testid="cell-frame-title"] span',
+        const match = state.resolveRow(row);
+        const marker = [
+          ...row.querySelectorAll<HTMLElement>(
+            '[data-testid="cell-frame-title"] span, [title]:not([data-zl-customers])',
+          ),
+        ].find(element =>
+          names
+            .get(element.getAttribute('title') || element.textContent || '')
+            ?.includes(match),
         );
         if (!marker) continue;
-        const possible =
-          row.dataset.id ||
-          row.dataset.jid ||
-          row.querySelector('[data-id]')?.getAttribute('data-id') ||
-          '';
-        const name = marker.getAttribute('title') || marker.textContent || '';
-        const match = /^\d{1,40}(?:-\d{1,30})?@(c\.us|lid|g\.us)$/.test(
-          possible,
-        )
-          ? possible
-          : names.get(name)?.length === 1
-            ? names.get(name)![0]
-            : '';
         const key = `${match}:${data.revision}`;
         const existingNote =
           row.querySelector<HTMLInputElement>('.zl-chat-note');
@@ -558,15 +626,24 @@ export function customerTick(
             commit();
             state.dirty = true;
           });
-          const titleBounds = titleLine.getBoundingClientRect();
           // Keep WhatsApp's virtual row height unchanged while making room for
           // the third text line between the native title and message preview.
           titleLine.style.top = '-6px';
-          const textBottom =
-            marker.getBoundingClientRect().bottom -
-            titleLine.getBoundingClientRect().top;
-          line.style.top = `${Math.max(18, titleBounds.height, textBottom + 2)}px`;
-          titleLine.append(line);
+          const rowBounds = row.getBoundingClientRect();
+          const nameBounds = marker.getBoundingClientRect();
+          // Keep the editor outside native title wrappers, which may clip it
+          // or place a pointer overlay over their overflowing third line.
+          if (getComputedStyle(row).position === 'static') {
+            state.layouts.set(row, {
+              position: row.style.position,
+              top: row.style.top,
+            });
+            row.style.position = 'relative';
+          }
+          line.style.left = `${Math.max(0, nameBounds.left - rowBounds.left)}px`;
+          line.style.width = `${Math.max(0, rowBounds.right - nameBounds.left - 18)}px`;
+          line.style.top = `${Math.max(0, nameBounds.bottom - rowBounds.top + 2)}px`;
+          row.append(line);
           if (preview && !preview.dataset.zlCustomers) {
             state.layouts.set(preview, {
               position: preview.style.position,

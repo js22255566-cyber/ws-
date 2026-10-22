@@ -128,6 +128,89 @@ try {
     );
   }
   const [first, second] = ids;
+  // Card dragging updates only local presentation order, never the account's
+  // identity or active guest. Start with trusted mouse input so a button inside
+  // the draggable card cannot silently prevent an actual Chromium drag.
+  let dragData;
+  const intercepted = event => {
+    const message = JSON.parse(event.data);
+    if (message.method === 'Input.dragIntercepted')
+      dragData = message.params.data;
+  };
+  socket.addEventListener('message', intercepted);
+  await call('Input.setInterceptDrags', { enabled: true });
+  const dragPoints = await evaluate(`(() => {
+    const source=document.querySelector('[data-service-id="${second}"] .account-card__select').getBoundingClientRect();
+    const target=document.querySelector('[data-service-id="${first}"]').getBoundingClientRect();
+    return {source:{x:source.x+source.width/2,y:source.y+source.height/2},target:{x:target.x+target.width/2,y:target.y+2}};
+  })()`);
+  try {
+    await call('Input.dispatchMouseEvent', {
+      type: 'mouseMoved',
+      ...dragPoints.source,
+    });
+    await call('Input.dispatchMouseEvent', {
+      type: 'mousePressed',
+      ...dragPoints.source,
+      button: 'left',
+      buttons: 1,
+      clickCount: 1,
+    });
+    await call('Input.dispatchMouseEvent', {
+      type: 'mouseMoved',
+      x: dragPoints.source.x + 20,
+      y: dragPoints.source.y - 20,
+      button: 'left',
+      buttons: 1,
+    });
+    for (let i = 0; i < 30; i += 1) {
+      if (dragData) break;
+      await new Promise(resolve => {
+        setTimeout(resolve, 100);
+      });
+    }
+    assert(dragData, 'native mouse starts a draggable account card');
+    await wait(
+      `document.querySelector('[data-service-id="${second}"]').classList.contains('is-dragging')`,
+      'card drag starts',
+    );
+    await call('Input.dispatchDragEvent', {
+      type: 'dragEnter',
+      ...dragPoints.target,
+      data: dragData,
+    });
+    await call('Input.dispatchDragEvent', {
+      type: 'dragOver',
+      ...dragPoints.target,
+      data: dragData,
+    });
+    await wait(
+      `document.querySelector('[data-service-id="${first}"]').classList.contains('drop-before')`,
+      'card insertion marker',
+    );
+    await call('Input.dispatchDragEvent', {
+      type: 'drop',
+      ...dragPoints.target,
+      data: dragData,
+    });
+  } finally {
+    await call('Input.dispatchMouseEvent', {
+      type: 'mouseReleased',
+      ...dragPoints.target,
+      button: 'left',
+      buttons: 0,
+      clickCount: 1,
+    });
+    await call('Input.setInterceptDrags', { enabled: false });
+    socket.removeEventListener('message', intercepted);
+  }
+  await wait(
+    `(() => {const ids=[...document.querySelectorAll('.account-card')].map(n=>n.dataset.serviceId);return ids.indexOf('${second}')<ids.indexOf('${first}') && window.ferdium.stores.settings.app.accountSidebar.accounts['${second}'].order < window.ferdium.stores.settings.app.accountSidebar.accounts['${first}'].order})()`,
+    'account card order saved',
+  );
+  console.log(
+    'PASS account card drag reorders and persists local preferences without replacing accounts',
+  );
   await click(`[data-service-id="${first}"] .account-card__select`);
   if (!process.argv.includes('--customers-only')) {
     // Use native mouse/keyboard input and screen coordinates: DOM-only clicks
@@ -1312,11 +1395,35 @@ try {
     `document.querySelector('#customer-notes')?.value==='仅客户面板显示的长备注'`,
     'private context works with missing native getter',
   );
-  await guest(
-    first,
-    `(()=>{const input=document.querySelector('[data-id="10002@c.us"][role=row] .zl-chat-note');input.focus();input.select();return true})()`,
+  const inlinePoint = await evaluate(`(async () => {
+    const view=${service(first)}.webview;
+    const host=view.getBoundingClientRect();
+    const input=await view.executeJavaScript(${JSON.stringify(`(() => {const r=document.querySelector('[data-id="10002@c.us"][role=row] .zl-chat-note').getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()`)});
+    return {x:host.x+input.x,y:host.y+input.y};
+  })()`);
+  await call('Input.dispatchMouseEvent', {
+    type: 'mousePressed',
+    ...inlinePoint,
+    button: 'left',
+    buttons: 1,
+    clickCount: 1,
+  });
+  await call('Input.dispatchMouseEvent', {
+    type: 'mouseReleased',
+    ...inlinePoint,
+    button: 'left',
+    buttons: 0,
+    clickCount: 1,
+  });
+  assert(
+    await guest(
+      first,
+      `document.activeElement?.classList.contains('zl-chat-note')`,
+    ),
+    'real mouse click focuses inline note before native row capture',
   );
-  await evaluate(`${service(first)}.webview.focus()`);
+  assert.equal(await guest(first, `fixture.nativeNoteInterceptions || 0`), 0);
+  await guest(first, `document.activeElement.select();true`);
   await call('Input.insertText', { text: '行内直接修改' });
   await wait(
     `document.querySelector('#customer-remark-name')?.value==='行内直接修改'`,
@@ -1349,6 +1456,24 @@ try {
     first,
     `for(let i=3;i<=7;i++)fixture.chats.push({id:{_serialized:(10000+i)+'@c.us',server:'c.us'},name:'置顶客户'+i});fixture.renderChats();true`,
   );
+  await guest(
+    first,
+    `fixture.chats.find(c=>c.id._serialized==='10007@c.us').set({pin:12345});true`,
+  );
+  await new Promise(resolve => {
+    setTimeout(resolve, 1300);
+  });
+  assert(
+    await guest(
+      first,
+      `!!document.querySelector('[role=row][data-id="10007@c.us"] [data-icon=pinned]')`,
+    ),
+    'official pin absent from an old local list must not be erased',
+  );
+  await guest(
+    first,
+    `fixture.chats.find(c=>c.id._serialized==='10007@c.us').set({pin:0});true`,
+  );
   for (const id of [
     '10001@g.us',
     '10002@c.us',
@@ -1362,7 +1487,7 @@ try {
     );
     await guest(
       first,
-      `(()=>{fixture.menuRole='${id === '10004@c.us' ? 'button' : 'menuitem'}';fixture.chineseMenu=${id === '10004@c.us'};const menu=document.querySelector('[role=row][data-id="${id}"] [data-testid=native-chat-menu]');menu.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true}));menu.click();document.querySelector('[data-animate-dropdown-item]').click();return true})()`,
+      `(()=>{fixture.menuRole='${id === '10004@c.us' ? 'button' : 'menuitem'}';fixture.chineseMenu=${id === '10004@c.us'};const menu=document.querySelector('[role=row][data-id="${id}"] [data-testid=native-chat-menu]');menu.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true}));menu.click();const item=document.querySelector('[data-testid=native-pin-item]');item.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,cancelable:true}));if(item.isConnected)item.dispatchEvent(new MouseEvent('mousedown',{bubbles:true,cancelable:true}));if(item.isConnected)item.click();return true})()`,
     );
     await wait(
       `(async()=>{return await ${service(first)}.webview.executeJavaScript("document.querySelector('#pane-side [role=row]')?.dataset.id === '${id}'")})()`,

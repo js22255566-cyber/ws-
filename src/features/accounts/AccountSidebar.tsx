@@ -28,7 +28,7 @@ import {
 } from '@mdi/js';
 import { observer } from 'mobx-react';
 import { runInAction } from 'mobx';
-import { Component } from 'react';
+import { Component, type DragEvent } from 'react';
 import type { StoresProps } from '../../@types/ferdium-components.types';
 import Icon from '../../components/ui/icon';
 import workspaceActions from '../workspaces/actions';
@@ -42,6 +42,8 @@ import {
   removeGroup,
   updateAccount,
   serializeAccountConfig,
+  orderedAccountIds,
+  moveAccount,
   type AccountSidebarConfig,
 } from './state';
 import { accountStatus, markAllWhatsAppRead } from './whatsapp';
@@ -59,6 +61,8 @@ interface State {
   menu: { id: string; anchor: HTMLElement; group?: boolean } | null;
   notice: string;
   busy: boolean;
+  dragging: string;
+  drop: { id: string; after: boolean } | null;
 }
 
 const statusLabels = {
@@ -81,8 +85,53 @@ const dialogTitles: Record<DialogKind, string> = {
 export default class AccountSidebar extends Component<StoresProps, State> {
   constructor(props: StoresProps) {
     super(props);
-    this.state = { dialog: null, menu: null, notice: '', busy: false };
+    this.state = {
+      dialog: null,
+      menu: null,
+      notice: '',
+      busy: false,
+      dragging: '',
+      drop: null,
+    };
   }
+
+  private suppressSelectUntil = 0;
+
+  private draggedAccount = '';
+
+  dragOver = (event: DragEvent<HTMLElement>, id: string): void => {
+    const { dragging } = this.state;
+    if (
+      !dragging ||
+      dragging === id ||
+      accountGroupId(this.config, dragging) !== accountGroupId(this.config, id)
+    )
+      return;
+    event.preventDefault();
+    const transfer = event.dataTransfer;
+    transfer.dropEffect = 'move';
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const after = event.clientY > bounds.top + bounds.height / 2;
+    if (this.state.drop?.id !== id || this.state.drop.after !== after)
+      this.setState({ drop: { id, after } });
+  };
+
+  dropAccount = (event: DragEvent<HTMLElement>, id: string): void => {
+    event.preventDefault();
+    const { dragging, drop } = this.state;
+    this.setState({ dragging: '', drop: null });
+    if (!dragging || drop?.id !== id) return;
+    const { config } = this;
+    const ids = this.props.stores.services.all
+      .filter(
+        service =>
+          !service.isTodosService &&
+          accountGroupId(config, service.id) === accountGroupId(config, id),
+      )
+      .map(service => service.id);
+    const next = moveAccount(config, ids, dragging, id, drop.after);
+    if (next !== config) this.perform(() => this.save(next));
+  };
 
   get config(): AccountSidebarConfig {
     return normalizeAccountConfig(
@@ -128,6 +177,11 @@ export default class AccountSidebar extends Component<StoresProps, State> {
   };
 
   select = (service: Service): void => {
+    if (
+      service.id === this.draggedAccount &&
+      Date.now() < this.suppressSelectUntil
+    )
+      return;
     this.perform(async () => {
       if (!service.isEnabled) {
         await this.props.stores.services._updateService({
@@ -289,8 +343,30 @@ export default class AccountSidebar extends Component<StoresProps, State> {
     return (
       <article
         key={service.id}
-        className={`account-card ${service.isActive ? 'is-active' : ''}`}
+        className={`account-card ${service.isActive ? 'is-active' : ''} ${this.state.dragging === service.id ? 'is-dragging' : ''} ${this.state.drop?.id === service.id ? (this.state.drop.after ? 'drop-after' : 'drop-before') : ''}`}
         data-service-id={service.id}
+        draggable={!this.state.busy}
+        onDragStart={event => {
+          if (
+            (event.target as HTMLElement).closest(
+              '.account-card__more, .account-card__sleep, .account-card__remark',
+            )
+          ) {
+            event.preventDefault();
+            return;
+          }
+          const transfer = event.dataTransfer;
+          transfer.effectAllowed = 'move';
+          event.dataTransfer.setData('text/plain', service.id);
+          this.draggedAccount = service.id;
+          this.setState({ dragging: service.id, drop: null, menu: null });
+        }}
+        onDragOver={event => this.dragOver(event, service.id)}
+        onDrop={event => this.dropAccount(event, service.id)}
+        onDragEnd={() => {
+          this.suppressSelectUntil = Date.now() + 250;
+          this.setState({ dragging: '', drop: null });
+        }}
       >
         <button
           type="button"
@@ -598,11 +674,15 @@ export default class AccountSidebar extends Component<StoresProps, State> {
         )}
         <div className="account-sidebar__groups">
           {config.groups.map(group => {
-            const accounts = services.all.filter(
+            const groupAccounts = services.all.filter(
               service =>
                 !service.isTodosService &&
                 accountGroupId(config, service.id) === group.id,
             );
+            const accounts = orderedAccountIds(
+              config,
+              groupAccounts.map(service => service.id),
+            ).map(id => groupAccounts.find(service => service.id === id)!);
             return (
               <section
                 key={group.id}

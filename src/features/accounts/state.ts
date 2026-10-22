@@ -12,6 +12,7 @@ export interface AccountPreferences {
   remark?: string;
   nickname?: string;
   zoom?: number;
+  order?: number;
 }
 
 export interface AccountSidebarConfig {
@@ -37,6 +38,7 @@ export function serializeAccountConfig(
           remark: prefs.remark,
           nickname: prefs.nickname,
           zoom: prefs.zoom,
+          order: prefs.order,
         },
       ]),
     ),
@@ -109,4 +111,41 @@ export function removeGroup(
 
 export function nextZoom(current: number, delta: number): number {
   return Math.max(0.3, Math.min(3, Math.round((current + delta) * 10) / 10));
+}
+
+export function orderedAccountIds(
+  config: AccountSidebarConfig,
+  ids: string[],
+): string[] {
+  return ids
+    .map((id, index) => ({ id, index }))
+    .sort(
+      (a, b) =>
+        (config.accounts[a.id]?.order ?? Number.MAX_SAFE_INTEGER) -
+          (config.accounts[b.id]?.order ?? Number.MAX_SAFE_INTEGER) ||
+        a.index - b.index,
+    )
+    .map(entry => entry.id);
+}
+
+export function moveAccount(
+  config: AccountSidebarConfig,
+  ids: string[],
+  source: string,
+  target: string,
+  after: boolean,
+): AccountSidebarConfig {
+  if (
+    source === target ||
+    !ids.includes(source) ||
+    !ids.includes(target) ||
+    accountGroupId(config, source) !== accountGroupId(config, target)
+  )
+    return config;
+  const order = orderedAccountIds(config, ids).filter(id => id !== source);
+  order.splice(order.indexOf(target) + (after ? 1 : 0), 0, source);
+  const accounts = { ...config.accounts };
+  for (const [index, id] of order.entries())
+    accounts[id] = { ...accounts[id], order: index };
+  return { ...config, accounts };
 }

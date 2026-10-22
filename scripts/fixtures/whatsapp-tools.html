@@ -41,6 +41,7 @@
         cursor: pointer;
       }
       .fixture-title {
+        overflow: hidden;
         height: 22px;
         display: flex;
         align-items: center;
@@ -175,8 +176,10 @@
           ...[...chats]
             .sort((a, b) => (b.pin || 0) - (a.pin || 0))
             .map(chat => {
-              chat.set ??= (key, value) => {
-                chat[key] = value;
+              chat.set ??= values => {
+                if (typeof values !== 'object')
+                  throw Error('Native model expects an attribute object');
+                Object.assign(chat, values);
                 fixture.renderChats();
               };
               const row = document.createElement('div');
@@ -198,12 +201,20 @@
               menu.textContent = '⌄';
               menu.onclick = event => {
                 event.stopPropagation();
-                document.querySelector('[role=menu]')?.remove();
+                document
+                  .querySelector('[data-testid=native-pin-popup]')
+                  ?.remove();
                 const popup = document.createElement('div');
-                popup.setAttribute('role', 'menu');
+                popup.setAttribute(
+                  'role',
+                  fixture.menuRole === 'button' ? 'presentation' : 'menu',
+                );
+                popup.dataset.testid = 'native-pin-popup';
                 const item = document.createElement('button');
                 item.setAttribute('role', fixture.menuRole || 'menuitem');
-                item.dataset.animateDropdownItem = 'true';
+                item.dataset.testid = 'native-pin-item';
+                if (fixture.menuRole !== 'button')
+                  item.dataset.animateDropdownItem = 'true';
                 item.textContent = fixture.chineseMenu
                   ? chat.pin
                     ? '取消置顶聊天'
@@ -211,7 +222,7 @@
                   : chat.pin
                     ? 'Unpin chat'
                     : 'Pin chat';
-                item.onclick = () => {
+                item.onmousedown = item.onclick = () => {
                   fixture.nativePinActions =
                     (fixture.nativePinActions || 0) + 1;
                 };
@@ -231,9 +242,21 @@
       };
       document.addEventListener('keydown', event => {
         if (event.key === 'Escape')
-          document.querySelector('[role=menu]')?.remove();
+          document.querySelector('[data-testid=native-pin-popup]')?.remove();
       });
       fixture.renderChats();
+      document.querySelector('#pane-side').addEventListener(
+        'pointerdown',
+        event => {
+          if (event.target.matches('input')) {
+            fixture.nativeNoteInterceptions =
+              (fixture.nativeNoteInterceptions || 0) + 1;
+            event.preventDefault();
+            event.stopPropagation();
+          }
+        },
+        true,
+      );
       class MsgKey {
         static async newId() {
           return crypto.randomUUID();

@@ -16,7 +16,7 @@ electron.ipcRenderer.invoke = (channel, ...args) => channel === 'account-tools-n
   : original.call(electron.ipcRenderer, channel, ...args);
 const box = document.createElement('div');
 box.className = 'app-titlebar';
-box.style.cssText = 'position:fixed;top:0;left:0;right:0;height:28px;background:#292c30;z-index:100000';
+box.style.cssText = 'position:fixed;top:0;left:0;right:0;background:#292c30;z-index:100000';
 document.body.append(box);
 const stores = observable({ services: { active: { id: 'network-one', recipe: { id: 'whatsapp' }, isEnabled: true, isHibernating: false, name: '账号一', accountSnapshot: { nickname: '' } } } });
 const root = createRoot(box);
@@ -57,10 +57,15 @@ try {
     ),
   );
   const region = await evaluate(
-    `(()=>{const node=document.querySelector('.account-network-status');const bounds=node.getBoundingClientRect();return {right:innerWidth-bounds.right,top:bounds.top,drag:getComputedStyle(node).getPropertyValue('-webkit-app-region')}})()`,
+    `(()=>{const node=document.querySelector('.account-network-status');const bounds=node.getBoundingClientRect();return {right:innerWidth-bounds.right,top:bounds.top,wrapperHeight:node.parentElement.getBoundingClientRect().height,drag:getComputedStyle(node).getPropertyValue('-webkit-app-region')}})()`,
   );
   assert(region.right >= 135, 'indicator leaves window controls available');
   assert.equal(region.top, 0);
+  assert.equal(
+    region.wrapperHeight,
+    28,
+    'compiled title-bar CSS overrides the global div height',
+  );
   assert.equal(region.drag, 'no-drag');
   await evaluate(
     `document.querySelector('[aria-label="刷新 IP 和延迟"]').click()`,
