@@ -81,10 +81,106 @@ export function translationTick(
         !/^(?:https?:\/\/|www\.)\S+$/i.test(text.trim())
       );
     };
-    const composer = () =>
-      document.querySelector<HTMLElement>(
+    const sendSelector =
+      '[aria-label="Send"], [aria-label="发送"], [data-icon="send"], [data-icon="wds-ic-send-filled"], [data-icon="send-filled"], [data-testid="compose-btn-send"], [data-testid="media-send"]';
+    const visible = (node: HTMLElement) =>
+      node.getClientRects().length > 0 &&
+      getComputedStyle(node).visibility !== 'hidden' &&
+      !node.closest('[aria-hidden="true"]');
+    state.mediaRoots = new WeakMap();
+    state.mediaSequence = 0;
+    const composerContext = () => {
+      const candidates: {
+        input: HTMLElement;
+        root: HTMLElement;
+        key: string;
+      }[] = [];
+      for (const input of document.querySelectorAll<HTMLElement>(
+        '[contenteditable="true"][role="textbox"], [contenteditable="true"][data-lexical-editor="true"]',
+      )) {
+        if (!visible(input)) continue;
+        const caption =
+          input.closest(
+            '[data-testid="media-caption-input-container"], [data-testid="media-caption-input"], [data-testid="media-editor-caption"]',
+          ) ||
+          /caption|添加说明|添加描述|添加文字|输入说明/i.test(
+            input.getAttribute('aria-label') || '',
+          );
+        if (
+          input.closest('#main footer') &&
+          !caption &&
+          !input.closest('[role="dialog"], [data-testid="media-editor"]')
+        )
+          continue;
+        let root = input.parentElement;
+        for (
+          let depth = 0;
+          root && depth < 10 && !root.matches('body, #app, #main');
+          depth += 1, root = root.parentElement
+        ) {
+          const media = root.querySelector(
+            'img[src^="blob:"], img[src^="data:image/"], video, canvas, [data-testid="media-preview"], [data-testid="media-editor"]',
+          );
+          if (
+            root.querySelector(sendSelector) &&
+            (media || (caption && root.matches('[role="dialog"]')))
+          ) {
+            if (!state.mediaRoots.has(root)) {
+              state.mediaSequence += 1;
+              state.mediaRoots.set(root, state.mediaSequence);
+            }
+            const sources = [
+              ...root.querySelectorAll<HTMLImageElement | HTMLVideoElement>(
+                'img[src^="blob:"], img[src^="data:image/"], video',
+              ),
+            ].map(
+              node =>
+                node.getAttribute('src') ||
+                (node as HTMLVideoElement).currentSrc ||
+                '',
+            );
+            const selected = [
+              ...root.querySelectorAll<HTMLElement>(
+                '[aria-selected="true"], [data-selected="true"]',
+              ),
+            ].map(node => [
+              node.dataset.id,
+              node.getAttribute('aria-label'),
+              node.querySelector('img')?.getAttribute('src'),
+            ]);
+            candidates.push({
+              input,
+              root,
+              key: JSON.stringify([
+                state.mediaRoots.get(root),
+                sources,
+                selected,
+              ]),
+            });
+            break;
+          }
+        }
+      }
+      if (candidates.length > 0) {
+        const focused = candidates.find(
+          item =>
+            item.input === document.activeElement ||
+            item.input.contains(document.activeElement),
+        );
+        return focused || (candidates.length === 1 ? candidates[0] : undefined);
+      }
+      const input = document.querySelector<HTMLElement>(
         '#main footer [contenteditable="true"][role="textbox"], #main footer [contenteditable="true"][data-lexical-editor="true"]',
       );
+      return input && visible(input)
+        ? { input, root: input.closest<HTMLElement>('footer')!, key: 'text' }
+        : undefined;
+    };
+    const composer = () => composerContext()?.input;
+    state.contextKey = (input: HTMLElement) => {
+      const context = composerContext();
+      return context?.input === input ? context.key : undefined;
+    };
     const chatKey = () => {
       try {
         const chat = page.require('WAWebChatGetters').getActiveChat?.();
@@ -198,8 +294,9 @@ export function translationTick(
     };
     const intercept = (event: Event) => {
       if (!state.config.outgoing) return;
-      const input = composer();
-      if (!input) return;
+      const context = composerContext();
+      const input = context?.input;
+      if (!input || !context) return;
       const key = event as KeyboardEvent;
       const sendKey =
         event.type === 'keydown' &&
@@ -207,18 +304,12 @@ export function translationTick(
         !key.shiftKey &&
         !key.isComposing;
       const target = event.target as Element;
+      const control = target?.closest('button, [role="button"]');
+      const sendNode =
+        target?.closest(sendSelector) || control?.querySelector(sendSelector);
       const sendClick =
         event.type === 'click' &&
-        Boolean(
-          target?.closest(
-            '#main footer button[aria-label="Send"], #main footer button[aria-label="发送"], #main footer [data-icon="send"], #main footer [data-icon="wds-ic-send-filled"], #main footer [data-testid="compose-btn-send"]',
-          ) ||
-            target
-              ?.closest('#main footer button')
-              ?.querySelector(
-                '[data-icon="send"], [data-icon="wds-ic-send-filled"], [data-icon="send-filled"]',
-              ),
-        );
+        Boolean(sendNode && context.root.contains(sendNode));
       if (
         !(sendKey && (target === input || input.contains(target))) &&
         !sendClick
@@ -248,6 +339,7 @@ export function translationTick(
       if (
         state.failedReplacement?.input === input &&
         state.failedReplacement.chat === chatKey() &&
+        state.failedReplacement.context === context.key &&
         state.failedReplacement.text === text
       ) {
         event.preventDefault();
@@ -261,6 +353,7 @@ export function translationTick(
       if (
         state.approved?.input === input &&
         state.approved.chat === chatKey() &&
+        state.approved.context === context.key &&
         !state.busy
       ) {
         state.approved = null;
@@ -284,6 +377,7 @@ export function translationTick(
         input,
         text,
         chat: chatKey(),
+        context: context.key,
         direction: 'outgoing',
       });
       state.queue.unshift({
@@ -562,7 +656,8 @@ export function translationResult(
     const valid =
       job.input.isConnected &&
       state.composer() === job.input &&
-      state.chatKey() === job.chat;
+      state.chatKey() === job.chat &&
+      state.contextKey(job.input) === job.context;
     if (phase === 'complete') {
       state.pending.delete(id);
       state.busy = false;
@@ -571,13 +666,18 @@ export function translationResult(
         state.normalizeText(state.readText(job.input)) ===
           state.normalizeText(result.text)
       ) {
-        state.approved = { input: job.input, chat: job.chat };
+        state.approved = {
+          input: job.input,
+          chat: job.chat,
+          context: job.context,
+        };
         state.notice('译文已填入：请校正后再次发送');
       } else {
         if (valid)
           state.failedReplacement = {
             input: job.input,
             chat: job.chat,
+            context: job.context,
             text: state.readText(job.input),
           };
         state.notice(
@@ -604,7 +704,11 @@ export function translationResult(
     if (state.normalizeText(job.text) === state.normalizeText(result.text)) {
       state.pending.delete(id);
       state.busy = false;
-      state.approved = { input: job.input, chat: job.chat };
+      state.approved = {
+        input: job.input,
+        chat: job.chat,
+        context: job.context,
+      };
       state.notice('内容无需改写，请确认后再次发送');
       return false;
     }
@@ -629,6 +733,8 @@ export function translationResult(
     // Focus handlers may replace the editor; revalidate before selecting anything.
     if (
       state.composer() !== job.input ||
+      state.contextKey(job.input) !== job.context ||
+      state.chatKey() !== job.chat ||
       state.readText(job.input) !== job.text
     ) {
       state.pending.delete(id);

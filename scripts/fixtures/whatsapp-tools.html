@@ -254,6 +254,56 @@
         if (!modules[name]) throw Error('unsupported ' + name);
         return modules[name];
       };
+      fixture.mediaSent = [];
+      fixture.openMedia = (caption = '', withRole = true) => {
+        document.querySelector('#fixture-media')?.remove();
+        const root = document.createElement('div');
+        root.id = 'fixture-media';
+        if (withRole) root.setAttribute('role', 'dialog');
+        root.style.cssText =
+          'position:fixed;inset:30px;z-index:100;background:#202c33;padding:30px;display:flex;flex-direction:column;gap:20px';
+        const image = document.createElement('img');
+        image.src = 'blob:https://web.whatsapp.com/synthetic-image-A';
+        image.style.height = '100px';
+        const wrap = document.createElement('div');
+        wrap.dataset.testid = 'media-caption-input-container';
+        const input = document.createElement('div');
+        input.contentEditable = 'true';
+        input.setAttribute('role', 'textbox');
+        input.setAttribute('aria-label', 'Add a caption');
+        input.dataset.lexicalEditor = 'true';
+        input.textContent = caption;
+        wrap.append(input);
+        const button = document.createElement('div');
+        button.setAttribute('role', 'button');
+        button.setAttribute('aria-label', 'Send');
+        button.tabIndex = 0;
+        button.innerHTML =
+          '<span data-icon="wds-ic-send-filled">发送图文</span>';
+        const close = document.createElement('button');
+        close.textContent = '取消图片';
+        close.onclick = () => root.remove();
+        const send = () => {
+          fixture.mediaSent.push({
+            caption: input.textContent,
+            image: image.getAttribute('src'),
+          });
+          root.remove();
+        };
+        button.onclick = send;
+        input.onkeydown = event => {
+          if (event.key === 'Enter' && !event.shiftKey) {
+            event.preventDefault();
+            send();
+          }
+        };
+        input.addEventListener('input', event => {
+          if (event.isTrusted) fixture.nativeInputs++;
+        });
+        root.append(image, wrap, button, close);
+        document.body.append(root);
+        input.focus();
+      };
       const editor = document.querySelector('[contenteditable]');
       editor.addEventListener('input', event => {
         if (event.isTrusted) fixture.nativeInputs++;

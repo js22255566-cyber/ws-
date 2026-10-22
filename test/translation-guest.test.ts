@@ -30,10 +30,12 @@ describe('two-phase native editor replacement guards', () => {
             input,
             text: 'original draft',
             chat: 'chat-1',
+            context: 'text',
           },
         ],
       ]),
       composer: () => input,
+      contextKey: () => 'text',
       chatKey: () => 'chat-1',
       normalizeText: (text: string) => text.replaceAll('\u00A0', ' ').trim(),
       notice: jest.fn(),
@@ -65,7 +67,7 @@ describe('two-phase native editor replacement guards', () => {
     expect(state.busy).toBe(true);
     input.innerText = 'translated\u00A0text';
     expect(translationResult(1, 'document-1', result, 'complete')).toBe(false);
-    expect(state.approved).toEqual({ input, chat: 'chat-1' });
+    expect(state.approved).toEqual({ input, chat: 'chat-1', context: 'text' });
     expect(state.busy).toBe(false);
   });
   it('never edits a draft that changed while translation was pending', () => {
@@ -75,6 +77,18 @@ describe('two-phase native editor replacement guards', () => {
     ).toBe(false);
     expect(input.focus).not.toHaveBeenCalled();
     expect(input.innerText).toBe('new draft');
+    expect(state.approved).toBeUndefined();
+  });
+  it('rejects a caption result after the media selection changes while the editor remains connected', () => {
+    state.pending.get(1).context = 'image-A';
+    state.contextKey = () => 'image-B';
+    expect(
+      translationResult(1, 'document-1', {
+        text: 'translated caption',
+        error: false,
+      }),
+    ).toBe(false);
+    expect(input.focus).not.toHaveBeenCalled();
     expect(state.approved).toBeUndefined();
   });
   it('does not act on a different document or chat', () => {
@@ -124,7 +138,7 @@ describe('two-phase native editor replacement guards', () => {
       }),
     ).toBe(false);
     expect(input.focus).not.toHaveBeenCalled();
-    expect(state.approved).toEqual({ input, chat: 'chat-1' });
+    expect(state.approved).toEqual({ input, chat: 'chat-1', context: 'text' });
   });
   it('refuses native insertion unless the entire original rich draft is selected', () => {
     selection.rangeCount = 1;
@@ -153,6 +167,7 @@ describe('two-phase native editor replacement guards', () => {
     expect(state.failedReplacement).toEqual({
       input,
       chat: 'chat-1',
+      context: 'text',
       text: 'original draft plus duplicate',
     });
     expect(state.approved).toBeUndefined();

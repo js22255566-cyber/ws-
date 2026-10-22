@@ -492,6 +492,109 @@ try {
         !report.includes('test-chat'),
       'diagnostics must omit content and attribute values',
     );
+    // Media preview caption is outside #main/footer and uses a role=button send control.
+    await guest(
+      first,
+      `document.querySelector('#main footer [contenteditable]').textContent='不要修改的聊天草稿';fixture.openMedia('你好');document.querySelector('#fixture-media [role=button]').click();true`,
+    );
+    await wait(
+      `${service(first)}.webview.executeJavaScript("document.querySelector('#fixture-media [contenteditable]')?.textContent").then(t=>t==='Hello translated')`,
+      'media caption native replacement',
+    );
+    assert.equal(
+      await guest(first, 'fixture.mediaSent.length'),
+      0,
+      'first click must not send original media caption',
+    );
+    assert.equal(
+      await guest(
+        first,
+        `document.querySelector('#main footer [contenteditable]').textContent`,
+      ),
+      '不要修改的聊天草稿',
+    );
+    await guest(
+      first,
+      `document.querySelector('#fixture-media [contenteditable]').textContent='Hello corrected caption';document.querySelector('#fixture-media [role=button]').click();true`,
+    );
+    assert.equal(
+      await guest(first, 'fixture.mediaSent.at(-1).caption'),
+      'Hello corrected caption',
+    );
+    await guest(
+      first,
+      `fixture.openMedia('你好',false);document.querySelector('#fixture-media [role=button]').click();true`,
+    );
+    await wait(
+      `${service(first)}.webview.executeJavaScript("document.querySelector('#fixture-media [contenteditable]')?.textContent").then(t=>t==='Hello translated')`,
+      'caption preview without dialog role',
+    );
+    await guest(
+      first,
+      `document.querySelector('#fixture-media [contenteditable]').dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));true`,
+    );
+    assert.equal(
+      await guest(first, 'fixture.mediaSent.at(-1).caption'),
+      'Hello translated',
+    );
+    const beforeCaptionFailure = await guest(first, 'fixture.mediaSent.length');
+    await vm('globalThis.__zlTranslateFail=true;true');
+    await guest(
+      first,
+      `fixture.openMedia('翻译失败的图片说明');document.querySelector('#fixture-media [role=button]').click();true`,
+    );
+    await wait(
+      `${service(first)}.webview.executeJavaScript("!window.__zlTranslation.busy && !window.__zlTranslation.approved && document.querySelector('#zl-translation-status')?.textContent.includes('消息尚未发送')")`,
+      'caption provider failure',
+    );
+    assert.equal(
+      await guest(first, 'fixture.mediaSent.length'),
+      beforeCaptionFailure,
+    );
+    assert.equal(
+      await guest(
+        first,
+        `document.querySelector('#fixture-media [contenteditable]').textContent`,
+      ),
+      '翻译失败的图片说明',
+    );
+    await vm('globalThis.__zlTranslateFail=false;true');
+    await guest(
+      first,
+      `document.querySelector('#fixture-media').remove();fixture.openMedia('等待翻译的图文');document.querySelector('#fixture-media [role=button]').click();true`,
+    );
+    await wait(
+      `(async()=>await ${service(first)}.webview.executeJavaScript("[...window.__zlTranslation.pending.values()].some(j=>j.direction==='outgoing')"))()`,
+      'caption request pending',
+    );
+    await guest(
+      first,
+      `document.querySelector('#fixture-media img').src='blob:https://web.whatsapp.com/synthetic-image-B';true`,
+    );
+    await wait(
+      `${service(first)}.webview.executeJavaScript("document.querySelector('#zl-translation-status')?.textContent").then(t=>t?.includes('已变化'))`,
+      'changing media discards pending caption',
+    );
+    assert.equal(
+      await guest(
+        first,
+        `document.querySelector('#fixture-media [contenteditable]').textContent`,
+      ),
+      '等待翻译的图文',
+    );
+    await guest(
+      first,
+      `document.querySelector('#fixture-media').remove();fixture.openMedia('🐭');document.querySelector('#fixture-media [role=button]').click();true`,
+    );
+    assert.equal(await guest(first, 'fixture.mediaSent.at(-1).caption'), '🐭');
+    await guest(
+      first,
+      `fixture.openMedia('');document.querySelector('#fixture-media [role=button]').click();document.querySelector('#main footer [contenteditable]').textContent='';true`,
+    );
+    assert.equal(await guest(first, 'fixture.mediaSent.at(-1).caption'), '');
+    console.log(
+      'PASS media captions translate before send, preserve background drafts, allow corrections and Enter, reject provider failures/media switches, and bypass emoji/empty captions',
+    );
     const callsBeforeEmoji = await vm('globalThis.__zlTranslationCalls');
     for (const value of [
       '🐭',
