@@ -34,11 +34,12 @@ export async function saveTools(
 }
 export async function configureTranslation(
   service: RealStores['services']['all'][number],
+  textColor?: string,
 ): Promise<void> {
   const config = await getTools(service.id);
   if (service.webview)
     await service.webview.executeJavaScript(
-      `(${translationTick.toString()})(${JSON.stringify(config.translation)},false)`,
+      `(${translationTick.toString()})(${JSON.stringify({ ...config.translation, textColor })},false)`,
     );
 }
 export function startTranslations(stores: RealStores): () => void {
@@ -62,7 +63,7 @@ export function startTranslations(stores: RealStores): () => void {
     try {
       const c = await getTools(service.id);
       const jobs: TranslationRequest[] = await view.executeJavaScript(
-        `(${translationTick.toString()})(${JSON.stringify(c.translation)})`,
+        `(${translationTick.toString()})(${JSON.stringify({ ...c.translation, textColor: stores.settings.app.translationTextColor })})`,
       );
       for (const job of jobs.sort(
         (a, b) =>

@@ -35,6 +35,7 @@
         overflow: auto;
       }
       .fixture-chat {
+        border-left: 5px solid transparent;
         height: 72px;
         padding: 14px 4px;
         border-bottom: 1px solid #29363c;
@@ -47,9 +48,14 @@
         align-items: center;
       }
       .fixture-preview {
+        margin-top: 10px;
         height: 18px;
         font-size: 12px;
         color: #9baab3;
+      }
+      .fixture-chat input[type='text'] {
+        text-indent: 30px;
+        font: 16px/25px sans-serif;
       }
       #main {
         flex: 1;
@@ -186,6 +192,7 @@
               row.className = 'fixture-chat';
               row.setAttribute('role', 'row');
               row.dataset.id = chat.id._serialized;
+              row.__reactProps$fixture = { chat };
               const title = document.createElement('div');
               title.className = 'fixture-title';
               title.dataset.testid = 'cell-frame-title';
@@ -210,10 +217,13 @@
                   fixture.menuRole === 'button' ? 'presentation' : 'menu',
                 );
                 popup.dataset.testid = 'native-pin-popup';
-                const item = document.createElement('button');
-                item.setAttribute('role', fixture.menuRole || 'menuitem');
+                const item = document.createElement(
+                  fixture.barePinItem ? 'li' : 'button',
+                );
+                if (!fixture.barePinItem)
+                  item.setAttribute('role', fixture.menuRole || 'menuitem');
                 item.dataset.testid = 'native-pin-item';
-                if (fixture.menuRole !== 'button')
+                if (!fixture.barePinItem && fixture.menuRole !== 'button')
                   item.dataset.animateDropdownItem = 'true';
                 item.textContent = fixture.chineseMenu
                   ? chat.pin
@@ -222,6 +232,12 @@
                   : chat.pin
                     ? 'Unpin chat'
                     : 'Pin chat';
+                if (fixture.barePinItem) {
+                  item.textContent = 'Fixar conversa';
+                  const glyph = document.createElement('span');
+                  glyph.dataset.icon = 'pin-v2';
+                  item.append(glyph);
+                }
                 item.onmousedown = item.onclick = () => {
                   fixture.nativePinActions =
                     (fixture.nativePinActions || 0) + 1;
@@ -270,7 +286,11 @@
         WAWebCollections: {
           Chat: {
             getModelsArray: () => chats,
-            get: id => chats.find(c => c.id._serialized === id),
+            get: id => {
+              const group = fixture.groupRows?.find(g => g.id === id);
+              if (group) return group.chat ? group : undefined;
+              return chats.find(c => c.id._serialized === id);
+            },
           },
         },
         WAWebProfilePicThumbCollection: {
@@ -327,6 +347,42 @@
           },
         },
       };
+      fixture.loadPinCommands = () => {
+        // Model a command-driven native menu: the limit guard runs before the
+        // exported action, without a recognizable DOM menu item.
+        modules.WAWebFixtureChatPinAction = {
+          getPinLimit: () => 3,
+          setPin: async (chat, enabled) => {
+            fixture.nativePinServerCalls =
+              (fixture.nativePinServerCalls || 0) + 1;
+            if (enabled && chats.filter(c => c.pin).length >= 3)
+              throw Error('You can only pin up to 3 chats.');
+            chat.set({ pin: enabled ? Date.now() : 0 });
+          },
+        };
+        modules.WAWebFixtureMsgPinAction = {
+          getPinLimit: () => 3,
+          setPin: () => 'message-pin-original',
+        };
+        modules.WAWebFixtureFrozenChatPinAction = Object.freeze({
+          getPinLimit: () => 3,
+          setPin: () => 'immutable-original',
+        });
+      };
+      fixture.nativePinCommand = id => {
+        const chat = chats.find(c => c.id._serialized === id);
+        const action = modules.WAWebFixtureChatPinAction;
+        if (
+          !chat.pin &&
+          chats.filter(c => c.pin).length >= action.getPinLimit()
+        ) {
+          fixture.nativePinLimitDialogs =
+            (fixture.nativePinLimitDialogs || 0) + 1;
+          throw Error('You can only pin up to 3 chats.');
+        }
+        return action.setPin(chat, !chat.pin);
+      };
+      modules.__debug = { modulesMap: modules };
       window.require = name => {
         if (!modules[name]) throw Error('unsupported ' + name);
         return modules[name];
@@ -410,6 +466,113 @@
           editor.innerText = '';
           editor.dispatchEvent(new Event('input', { bubbles: true }));
         }
+      };
+      fixture.installGroupTools = () => {
+        fixture.beforeGroupWPP = window.WPP;
+        fixture.groupRows = [
+          {
+            id: '10001@g.us',
+            subject: '管理群 A',
+            announce: false,
+            admin: true,
+            member: true,
+            chat: true,
+          },
+          {
+            id: '10003@g.us',
+            subject: '管理群 B',
+            announce: false,
+            admin: true,
+            member: true,
+            chat: true,
+          },
+          {
+            id: '10004@g.us',
+            subject: '非管理员群',
+            announce: false,
+            admin: false,
+            member: true,
+            chat: true,
+          },
+        ];
+        fixture.groupCalls = [];
+        fixture.groupFailAfterApply = true;
+        fixture.groupIgnoreOnce = true;
+        fixture.groupDeleteOnce = true;
+        const row = id => fixture.groupRows.find(g => g.id === id);
+        const log = (operation, id) =>
+          fixture.groupCalls.push({ operation, id, at: Date.now() });
+        const previous = window.WPP || {};
+        window.WPP = {
+          ...previous,
+          isReady: true,
+          conn: {
+            ...previous.conn,
+            getMyUserWid: () => fixture.ownPhone + '@c.us',
+          },
+          whatsapp: {
+            ...previous.whatsapp,
+            queryAllGroups: async () =>
+              fixture.groupRows.filter(g => g.member).map(g => ({ ...g })),
+            ChatStore: { get: id => (row(id)?.chat ? row(id) : undefined) },
+          },
+          group: {
+            iAmAdmin: async id => Boolean(row(id)?.admin),
+            iAmMember: async id => Boolean(row(id)?.member),
+            getGroupInfoFromInviteCode: async code => ({
+              id: code.startsWith('A') ? '90001@g.us' : '90002@g.us',
+              membershipApprovalMode: code.startsWith('B'),
+            }),
+            setProperty: async (id, property, value) => {
+              log(value ? 'mute' : 'open', id);
+              if (property !== 'announcement' || !row(id)?.admin)
+                throw Error('not admin');
+              if (id === '10003@g.us' && fixture.groupIgnoreOnce) {
+                fixture.groupIgnoreOnce = false;
+                return true;
+              }
+              row(id).announce = value;
+              if (fixture.groupFailAfterApply) {
+                fixture.groupFailAfterApply = false;
+                throw Error('synthetic lost response after apply');
+              }
+              return true;
+            },
+            join: async code => {
+              const id = code.startsWith('A') ? '90001@g.us' : '90002@g.us';
+              log('join', id);
+              const pending = code.startsWith('B');
+              if (!row(id))
+                fixture.groupRows.push({
+                  id,
+                  subject: pending ? '审批群' : '进群测试',
+                  admin: false,
+                  announce: false,
+                  member: !pending,
+                  chat: !pending,
+                });
+              return { id, pendingApproval: pending };
+            },
+            leave: async id => {
+              log('leave', id);
+              row(id).member = false;
+            },
+          },
+          chat: {
+            ...previous.chat,
+            delete: async id => {
+              if (row(id)?.member) throw Error('must leave before deletion');
+              log('delete', id);
+              if (id === '10003@g.us' && fixture.groupDeleteOnce) {
+                fixture.groupDeleteOnce = false;
+                throw Error('synthetic delete failure');
+              }
+              row(id).chat = false;
+              return { status: 200 };
+            },
+          },
+        };
+        return true;
       };
       document.querySelector('footer button').addEventListener('click', send);
       editor.addEventListener('keydown', e => {

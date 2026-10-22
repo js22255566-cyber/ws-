@@ -146,10 +146,8 @@ class AppLayout extends Component<PropsWithChildren<IProps>, IState> {
           >
             {isWindows && !isFullScreen && (
               <div className="app-titlebar">
-                <TitleBar
-                  menu={window['ferdium'].menu.template}
-                  icon="assets/images/logo.svg"
-                />
+                <TitleBar menu={[]} icon="assets/images/logo.svg" />
+                <span className="app-titlebar__brand">ZL-WA</span>
                 {this.props.networkStatus}
               </div>
             )}

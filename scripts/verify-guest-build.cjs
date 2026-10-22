@@ -4,6 +4,7 @@
 const assert = require('node:assert/strict');
 const vm = require('node:vm');
 const {
+  applyWhatsAppTheme,
   readWhatsAppSnapshot,
   markAllWhatsAppRead,
 } = require('../build/features/accounts/whatsapp');
@@ -17,6 +18,7 @@ const { defaultTools } = require('../build/features/accountTools/config');
 
 const advanced = require('../build/features/accountTools/bulkGuest');
 const customers = require('../build/features/customers/guest');
+const { groupGuest } = require('../build/features/groups/guest');
 
 (async () => {
   const modules = {
@@ -56,6 +58,11 @@ const customers = require('../build/features/customers/guest');
   );
   context.window.__zlCustomers = { queue: [], data: undefined };
   assert.equal(call(customers.customerTick).length, 0);
+  assert.equal(call(applyWhatsAppTheme, [true]), false);
+  await assert.rejects(
+    call(groupGuest, [{ ownerId: '8613800000001@c.us' }]),
+    /群组接口尚未就绪/,
+  );
   const snapshot = await call(readWhatsAppSnapshot);
   assert.equal(snapshot.status, 'online');
   const receipts = await call(markAllWhatsAppRead);

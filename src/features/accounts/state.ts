@@ -16,6 +16,7 @@ export interface AccountPreferences {
 }
 
 export interface AccountSidebarConfig {
+  collapsed?: boolean;
   groups: AccountGroup[];
   accounts: Record<string, AccountPreferences>;
 }
@@ -25,6 +26,7 @@ export function serializeAccountConfig(
   config: AccountSidebarConfig,
 ): AccountSidebarConfig {
   return {
+    collapsed: Boolean(config.collapsed),
     groups: config.groups.map(group => ({
       id: group.id,
       name: group.name,
@@ -68,7 +70,11 @@ export function normalizeAccountConfig(
       });
     }
   }
-  return { groups, accounts: raw?.accounts ?? {} };
+  return {
+    collapsed: Boolean(raw?.collapsed),
+    groups,
+    accounts: raw?.accounts ?? {},
+  };
 }
 
 export function accountGroupId(
@@ -99,6 +105,7 @@ export function removeGroup(
 ): AccountSidebarConfig {
   if (id === DEFAULT_GROUP_ID) throw new Error('默认分组不能删除');
   return {
+    ...config,
     groups: config.groups.filter(group => group.id !== id),
     accounts: Object.fromEntries(
       Object.entries(config.accounts).map(([key, value]) => [

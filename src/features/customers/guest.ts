@@ -142,6 +142,58 @@ export function customerTick(
     page.__zlCustomers = state;
     state.inlineDrafts = new Map();
     state.commits = new WeakMap();
+    state.rowGeometry = new WeakMap();
+    state.initialGeometry = new WeakMap();
+    state.changedRows = new WeakSet();
+    state.resizeTargets = new Set();
+    if (typeof ResizeObserver !== 'undefined') {
+      state.resizeObserver = new ResizeObserver(() => {
+        state.dirty = true;
+      });
+    }
+    state.watchSize = (element: Element | undefined | null) => {
+      if (!element || !state.resizeObserver || state.resizeTargets.has(element))
+        return;
+      state.resizeTargets.add(element);
+      state.resizeObserver.observe(element);
+    };
+    state.geometry = (
+      row: HTMLElement,
+      marker: HTMLElement,
+      line?: HTMLElement | null,
+      preview?: HTMLElement,
+    ) => {
+      const base = row.getBoundingClientRect();
+      const relative = (element?: HTMLElement | null) => {
+        if (!element?.isConnected) return [];
+        const bounds = element.getBoundingClientRect();
+        return [
+          bounds.left - base.left,
+          bounds.top - base.top,
+          bounds.width,
+          bounds.height,
+        ].map(value => Math.round(value * 4) / 4);
+      };
+      const style = getComputedStyle(marker);
+      return JSON.stringify([
+        base.width,
+        base.height,
+        relative(marker),
+        relative(line),
+        relative(preview),
+        style.fontSize,
+        style.lineHeight,
+      ]);
+    };
+    window.addEventListener('resize', () => {
+      state.dirty = true;
+    });
+    document.fonts?.ready.then(() => {
+      state.dirty = true;
+    });
+    document.fonts?.addEventListener('loadingdone', () => {
+      state.dirty = true;
+    });
     state.action = (
       chatId: string,
       action: string,
@@ -154,13 +206,12 @@ export function customerTick(
     const style = document.createElement('style');
     style.dataset.zlCustomers = 'style';
     style.textContent = `
-      .zl-chat-note{position:absolute;box-sizing:border-box;line-height:12px;font:11px/12px sans-serif;color:#ff6060;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;z-index:4;height:14px!important;min-height:0!important;padding:0!important;margin:0!important;border:0!important;background:transparent!important;outline:none;cursor:text;pointer-events:auto!important;user-select:text!important;-webkit-user-select:text!important;-webkit-app-region:no-drag}
+      .zl-chat-note{position:absolute;box-sizing:border-box;font:11px/13px sans-serif!important;text-indent:0!important;text-align:start!important;letter-spacing:normal!important;appearance:none!important;transform:none!important;color:#ff6060;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;z-index:4;height:13px!important;min-height:0!important;padding:0!important;margin:0!important;border:0!important;background:transparent!important;outline:none;cursor:text;pointer-events:auto!important;user-select:text!important;-webkit-user-select:text!important;-webkit-app-region:no-drag}
       .zl-chat-note::placeholder{color:#8a969c}
       .zl-chat-note:focus{box-shadow:0 1px #579dff}
       .zl-chat-note[data-save-state="error"]{box-shadow:0 1px #ff6060}
       .zl-customer-flags{display:inline-flex;gap:3px;vertical-align:middle;height:auto!important;margin-left:5px}
       .zl-customer-flag{display:inline-flex;align-items:center;justify-content:center;width:17px;height:17px!important;border-radius:50%;font:12px sans-serif;color:white}
-      .zl-header-note{color:#ff6060;font:12px sans-serif;margin-left:8px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
     `;
     document.head.append(style);
     state.nativePins = new Map();
@@ -179,6 +230,107 @@ export function customerTick(
         }
       }
       if (Number(model.pin || 0) !== pin) Reflect.set(model, 'pin', pin);
+    };
+    // All entry points use one local transaction. Never invoke the native
+    // server action for desktop pins, including UI commands bypassing the DOM.
+    state.pinOwnerMatches = () => {
+      try {
+        const prefs = page.require?.('WAWebUserPrefsMeUser');
+        return [prefs?.getMaybeMePnUser?.(), prefs?.getMaybeMeLidUser?.()].some(
+          id =>
+            (id?._serialized ||
+              (id?.user && id?.server ? `${id.user}@${id.server}` : '')) ===
+            state.data?.owner,
+        );
+      } catch {
+        return false;
+      }
+    };
+    state.changePin = (id: string, remove: boolean) => {
+      if (
+        !state.data ||
+        !state.pinOwnerMatches() ||
+        !state.models?.some((m: any) => state.idOf(m) === id)
+      )
+        return false;
+      const key = state.data.aliases[id] || id;
+      state.action(id, remove ? 'unpin' : 'pin');
+      state.data = {
+        ...state.data,
+        pins: remove
+          ? state.data.pins.filter((p: string) => p !== key)
+          : [key, ...state.data.pins.filter((p: string) => p !== key)],
+        unpinned: remove
+          ? [...new Set([...(state.data.unpinned || []), key])]
+          : (state.data.unpinned || []).filter((p: string) => p !== key),
+      };
+      // Update immediately, so the original UI closes and renders its own pin.
+      for (const model of state.models) {
+        const chat = state.data.aliases[state.idOf(model)] || state.idOf(model);
+        if (!state.data.pins.includes(chat) && chat !== key) continue;
+        if (!state.nativePins.has(model))
+          state.nativePins.set(model, model.pin || 0);
+        const index = state.data.pins.indexOf(chat);
+        state.setNativePin(model, index < 0 ? 0 : 2_000_000_000 - index);
+      }
+      state.dirty = true;
+      return true;
+    };
+    state.pinModules = new WeakSet();
+    state.installPinCommands = () => {
+      // Meta modules can be registered lazily after the first context menu.
+      // Only inspect pin-specific modules, never execute the whole registry.
+      let registry: any;
+      try {
+        registry = page.require?.('__debug')?.modulesMap;
+      } catch {
+        return;
+      }
+      for (const name of Object.keys(registry || {})) {
+        if (!/^waweb.*pin/i.test(name) || /msg|message/i.test(name)) continue;
+        try {
+          const module = page.require(name);
+          if (
+            !module ||
+            state.pinModules.has(module) ||
+            typeof module.setPin !== 'function'
+          )
+            continue;
+          const original = module.setPin;
+          const command = function localPinCommand(this: any, ...args: any[]) {
+            const [chat, enabled] = args;
+            const id =
+              state.idOf?.(chat) ||
+              chat?._serialized ||
+              (typeof chat === 'string' ? chat : '');
+            if (typeof enabled === 'boolean' && state.changePin(id, !enabled))
+              return Promise.resolve();
+            return original.apply(this, args);
+          };
+          // Verify replacement before relaxing the UI's guard. Frozen exports
+          // remain untouched and the capture handler continues to handle them.
+          if (
+            !Reflect.set(module, 'setPin', command) ||
+            module.setPin !== command
+          )
+            continue;
+          if (typeof module.getPinLimit === 'function') {
+            const limit = module.getPinLimit;
+            Reflect.set(
+              module,
+              'getPinLimit',
+              function localPinLimit(this: any, ...args: any[]) {
+                return state.pinOwnerMatches() && state.models?.length
+                  ? Number.MAX_SAFE_INTEGER
+                  : limit.apply(this, args);
+              },
+            );
+          }
+          state.pinModules.add(module);
+        } catch {
+          /* Unloaded or immutable native module; retry on the next tick. */
+        }
+      }
     };
     // Intercept before React's capture handlers on the chat list. Native rows
     // often consume mouse-down before the injected input's bubble listeners.
@@ -229,15 +381,18 @@ export function customerTick(
       const row = target.closest?.(
         '#pane-side [role="row"], #pane-side [data-testid="cell-frame-container"]',
       );
-      if (row) state.menuChat = state.resolveRow?.(row) || '';
-      else if (
+      if (row) {
+        state.menuChat = state.resolveRow?.(row) || '';
+        state.installPinCommands();
+      } else if (
         !target.closest?.(
-          '[role="menu"], [role="menuitem"], [role="button"], [data-animate-dropdown], [data-animate-dropdown-item], [data-testid="mi-pin"], [data-testid="mi-unpin"]',
+          '[role="menu"], [role="menuitem"], [role="button"], [data-animate-dropdown], [data-animate-dropdown-item], [data-testid="mi-pin"], [data-testid="mi-unpin"], li, button',
         )
       )
         state.menuChat = '';
     };
-    document.addEventListener('pointerdown', rememberRow, true);
+    window.addEventListener('pointerdown', rememberRow, true);
+    window.addEventListener('mousedown', rememberRow, true);
     document.addEventListener('contextmenu', rememberRow, true);
     document.addEventListener(
       'focusin',
@@ -250,39 +405,31 @@ export function customerTick(
     const pinMenuEvent = (event: Event) => {
       const target = event.target as Element;
       const item = target.closest?.(
-        '[role="menuitem"], [data-testid="mi-pin"], [data-testid="mi-unpin"], [data-animate-dropdown-item], [role="button"]',
+        '[role="menuitem"], [data-testid="mi-pin"], [data-testid="mi-unpin"], [data-animate-dropdown-item], [role="button"], li, button',
       );
       if (!item || !state.menuChat || !state.data) return;
-      const text = item.textContent?.trim() || '';
+      const text = (item.textContent || item.getAttribute('aria-label') || '')
+        .replaceAll(/\s+/g, ' ')
+        .trim();
       const icon =
         item.querySelector('[data-icon]')?.getAttribute('data-icon') || '';
       const unpin =
         /^(unpin chat|取消置顶(?:聊天)?)$/i.test(text) ||
-        /^(unpin|pinned-off|pin-off)$/.test(icon);
+        /^(unpin|pinned-off|pin-off)(?:-v\d+)?$/.test(icon);
       const pin =
-        /^(pin chat|置顶(?:聊天)?)$/i.test(text) || /^(pin|pinned)$/.test(icon);
+        /^(pin chat|置顶(?:聊天)?)$/i.test(text) ||
+        /^(pin|pinned)(?:-v\d+)?$/.test(icon);
       if (!pin && !unpin) return;
       const id = state.menuChat;
       if (!state.models?.some((m: any) => state.idOf(m) === id)) return;
+      if (!state.pinOwnerMatches()) return;
       event.preventDefault();
       event.stopImmediatePropagation();
-      const key = state.data.aliases[id] || id;
       if (state.handledPinItem === item) return;
       state.handledPinItem = item;
-      const remove = unpin;
-      state.action(id, remove ? 'unpin' : 'pin');
-      // Optimistic local order also prevents a second fast click reversing a
-      // stale menu state before the host has persisted the action.
-      state.data = {
-        ...state.data,
-        pins: remove
-          ? state.data.pins.filter((p: string) => p !== key)
-          : [key, ...state.data.pins.filter((p: string) => p !== key)],
-        unpinned: remove
-          ? [...new Set([...(state.data.unpinned || []), key])]
-          : (state.data.unpinned || []).filter((p: string) => p !== key),
-      };
-      state.dirty = true;
+      const model = state.models.find((m: any) => state.idOf(m) === id);
+      const explicitPin = /^(pin chat|置顶(?:聊天)?)$/i.test(text);
+      state.changePin(id, unpin || (!explicitPin && Boolean(model?.pin)));
       item.dispatchEvent(
         new KeyboardEvent('keydown', {
           key: 'Escape',
@@ -294,12 +441,41 @@ export function customerTick(
     // Match and cancel both pointer/mouse-down and click: relying on click is
     // too late for native menus that open the three-pin limit dialog on down.
     for (const kind of ['pointerdown', 'mousedown', 'click'])
-      document.addEventListener(kind, pinMenuEvent, true);
+      window.addEventListener(kind, pinMenuEvent, true);
     state.observer = new MutationObserver(changes => {
-      if (
-        changes.some(
-          c => !(c.target as Element).closest?.('[data-zl-customers]'),
+      for (const change of changes) {
+        if (
+          change.type !== 'childList' ||
+          (change.target as Element).closest?.('[data-zl-customers]')
         )
+          continue;
+        const nativeChanged = [
+          ...change.addedNodes,
+          ...change.removedNodes,
+        ].some(
+          node =>
+            !(
+              node instanceof HTMLElement &&
+              node.dataset.zlCustomers !== undefined
+            ),
+        );
+        if (!nativeChanged) continue;
+        const row = (change.target as Element).closest?.(
+          '#pane-side [role="row"], #pane-side [data-testid="cell-frame-container"]',
+        );
+        if (row) state.changedRows.add(row);
+      }
+      if (
+        changes.some(c => {
+          const target = c.target as Element;
+          if (target.closest?.('[data-zl-customers]')) return false;
+          if (
+            c.type === 'attributes' &&
+            (c.attributeName === 'class' || c.attributeName === 'style')
+          )
+            return Boolean(target.closest?.('#pane-side'));
+          return true;
+        })
       )
         state.dirty = true;
     });
@@ -307,7 +483,7 @@ export function customerTick(
       childList: true,
       subtree: true,
       attributes: true,
-      attributeFilter: ['title', 'data-id', 'data-jid'],
+      attributeFilter: ['title', 'data-id', 'data-jid', 'class', 'style'],
     });
     document.addEventListener(
       'scroll',
@@ -393,6 +569,7 @@ export function customerTick(
     String(
       model.formattedTitle ||
         model.name ||
+        model.contact?.name ||
         model.contact?.pushname ||
         model.id?.user ||
         '',
@@ -405,6 +582,24 @@ export function customerTick(
   state.models = models;
   state.idOf = idOf;
   state.resolveRow = (row: HTMLElement) => {
+    // Native virtual rows often have no data-jid. Read the exact model from
+    // React props before any display-name fallback (duplicate names are valid).
+    for (const element of [row, ...row.querySelectorAll('*')]) {
+      const propsKey = Object.keys(element).find(k =>
+        k.startsWith('__reactProps$'),
+      );
+      const props = propsKey ? (element as any)[propsKey] : undefined;
+      for (const candidate of [
+        props?.chat,
+        props?.data?.chat,
+        props?.chatModel,
+        props?.data,
+        props?.model,
+      ]) {
+        const id = idOf(candidate || {});
+        if (id && models.some(m => idOf(m) === id)) return id;
+      }
+    }
     const possible =
       row.dataset.id ||
       row.dataset.jid ||
@@ -426,6 +621,7 @@ export function customerTick(
     ];
     return ids.length === 1 ? ids[0] : '';
   };
+  state.installPinCommands();
   // Project local pins onto the native model, so WhatsApp's own collection,
   // virtual list, pin glyph and menu all render the normal pinned-chat state.
   // Do not call setPin / server chat actions: their three-chat limit and phone
@@ -457,6 +653,13 @@ export function customerTick(
     state.lastRender = Date.now();
     const pane = document.querySelector<HTMLElement>('#pane-side');
     if (pane) {
+      for (const element of state.resizeTargets) {
+        if (!element.isConnected) {
+          state.resizeObserver.unobserve(element);
+          state.resizeTargets.delete(element);
+        }
+      }
+      state.watchSize(pane);
       const rows = [
         ...pane.querySelectorAll<HTMLElement>(
           '[role="row"], [data-testid="cell-frame-container"]',
@@ -481,6 +684,7 @@ export function customerTick(
         const key = `${match}:${data.revision}`;
         const existingNote =
           row.querySelector<HTMLInputElement>('.zl-chat-note');
+        const previousGeometry = state.rowGeometry.get(row);
         if (
           existingNote &&
           document.activeElement === existingNote &&
@@ -490,9 +694,42 @@ export function customerTick(
         if (
           row.dataset.zlCustomerKey === key &&
           row.dataset.zlCustomerRendered === 'true' &&
-          existingNote
+          existingNote &&
+          !state.changedRows.has(row) &&
+          previousGeometry?.marker === marker &&
+          previousGeometry.signature ===
+            state.geometry(row, marker, existingNote, previousGeometry.preview)
         )
           continue;
+        state.watchSize(row);
+        state.watchSize(marker);
+        // A newly logged-in list can still be hidden, animating or waiting for
+        // its initial font/layout. Wait for two stable samples before adding
+        // the third line; later resizes invalidate the geometry cache above.
+        if (!existingNote) {
+          const bounds = row.getBoundingClientRect();
+          const nameBounds = marker.getBoundingClientRect();
+          if (
+            !bounds.width ||
+            !bounds.height ||
+            !nameBounds.width ||
+            !nameBounds.height
+          ) {
+            state.dirty = true;
+            continue;
+          }
+          const signature = state.geometry(row, marker);
+          const initial = state.initialGeometry.get(row);
+          if (!initial || initial.signature !== signature) {
+            state.initialGeometry.set(row, { signature, at: Date.now() });
+            state.dirty = true;
+            continue;
+          }
+          if (Date.now() - initial.at < 150) {
+            state.dirty = true;
+            continue;
+          }
+        }
         for (const element of [row, ...row.querySelectorAll('*')]) {
           const old = state.layouts.get(element);
           if (old) {
@@ -537,7 +774,8 @@ export function customerTick(
           position: titleLine.style.position,
           top: titleLine.style.top,
         });
-        titleLine.style.position = 'relative';
+        if (getComputedStyle(titleLine).position === 'static')
+          titleLine.style.position = 'relative';
         titleLine.append(flags(match));
         row.dataset.zlCustomerRendered = 'true';
         const note = summary(match)?.remarkName;
@@ -628,7 +866,7 @@ export function customerTick(
           });
           // Keep WhatsApp's virtual row height unchanged while making room for
           // the third text line between the native title and message preview.
-          titleLine.style.top = '-6px';
+          titleLine.style.top = `${(Number.parseFloat(getComputedStyle(titleLine).top) || 0) - 6}px`;
           const rowBounds = row.getBoundingClientRect();
           const nameBounds = marker.getBoundingClientRect();
           // Keep the editor outside native title wrappers, which may clip it
@@ -641,21 +879,47 @@ export function customerTick(
             row.style.position = 'relative';
           }
           line.style.left = `${Math.max(0, nameBounds.left - rowBounds.left)}px`;
-          line.style.width = `${Math.max(0, rowBounds.right - nameBounds.left - 18)}px`;
-          line.style.top = `${Math.max(0, nameBounds.bottom - rowBounds.top + 2)}px`;
+          const textRight =
+            preview?.getBoundingClientRect().right || rowBounds.right - 18;
+          const width = Math.max(0, textRight - nameBounds.left);
+          line.style.width = `${width}px`;
+          line.style.top = `${Math.max(0, nameBounds.bottom - rowBounds.top + 1)}px`;
           row.append(line);
+          // Native row borders, padding and containing blocks can shift an
+          // absolutely positioned input. Align the rendered box with the name,
+          // rather than assuming the row's border box is its CSS origin.
+          const actual = line.getBoundingClientRect();
+          const scaleX =
+            width > 0 && actual.width > 0 ? actual.width / width : 1;
+          const scaleY = actual.height > 0 ? actual.height / 13 : 1;
+          line.style.left = `${Number.parseFloat(line.style.left) + (nameBounds.left - actual.left) / scaleX}px`;
+          line.style.top = `${Number.parseFloat(line.style.top) + (nameBounds.bottom + 1 - actual.top) / scaleY}px`;
+          line.style.width = `${width / scaleX}px`;
           if (preview && !preview.dataset.zlCustomers) {
             state.layouts.set(preview, {
               position: preview.style.position,
               top: preview.style.top,
             });
-            preview.style.position = 'relative';
+            if (getComputedStyle(preview).position === 'static')
+              preview.style.position = 'relative';
+            const initialTop =
+              Number.parseFloat(getComputedStyle(preview).top) || 0;
             const gap =
               line.getBoundingClientRect().bottom +
-              2 -
+              1 -
               preview.getBoundingClientRect().top;
-            preview.style.top = `${Math.max(7, gap)}px`;
+            // Move upward as well as downward to remove native margins; a
+            // minimum positive shift previously left large blank bands.
+            preview.style.top = `${initialTop + gap / scaleY}px`;
           }
+          state.rowGeometry.set(row, {
+            marker,
+            preview,
+            signature: state.geometry(row, marker, line, preview),
+          });
+          state.changedRows.delete(row);
+          state.watchSize(titleLine);
+          state.watchSize(preview);
         }
       }
     }
@@ -669,6 +933,8 @@ export function customerTick(
       /* No conversation. */
     }
     const header = document.querySelector('#main header');
+    // Remove notes left by an older injected version without touching native text.
+    header?.querySelectorAll('.zl-header-note').forEach(n => n.remove());
     if (
       header &&
       (state.headerKey !== `${active}:${data.revision}` ||
@@ -679,12 +945,11 @@ export function customerTick(
       if (name && active) {
         const line = document.createElement('span');
         line.dataset.zlCustomers = 'header';
-        line.append(flags(active));
-        const note = document.createElement('span');
-        note.className = 'zl-header-note';
-        note.textContent = summary(active)?.remarkName || '';
-        line.append(note);
-        name.after(line);
+        const markers = flags(active);
+        if (markers.childNodes.length > 0) {
+          line.append(markers);
+          name.after(line);
+        }
       }
       state.headerKey = `${active}:${data.revision}`;
     }

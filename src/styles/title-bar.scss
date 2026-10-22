@@ -182,3 +182,18 @@
     display: none;
   }
 }
+
+.app-titlebar__brand {
+  position: absolute;
+  left: 32px;
+  top: 0;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  font:
+    600 12px 'Segoe UI',
+    sans-serif;
+  color: inherit;
+  pointer-events: none;
+  -webkit-app-region: drag;
+}

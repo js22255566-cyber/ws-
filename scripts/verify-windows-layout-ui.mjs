@@ -99,6 +99,24 @@ try {
     `!!window.__zlWindowsLayoutFixture.box.querySelector('#electron-app-title-bar')`,
     'real Windows title bar',
   );
+  assert.equal(
+    await evaluate(
+      `window.__zlWindowsLayoutFixture.box.querySelector('.app-titlebar__brand')?.textContent`,
+    ),
+    'ZL-WA',
+  );
+  assert.equal(
+    await evaluate(
+      `window.__zlWindowsLayoutFixture.box.querySelectorAll('.toolbar-dropdown').length`,
+    ),
+    0,
+  );
+  assert.equal(
+    await evaluate(
+      `window.__zlWindowsLayoutFixture.box.querySelectorAll('.window-controls button').length`,
+    ),
+    3,
+  );
   // Reproduce the exact 7.2.8 defect, then remove only the injected old rule.
   const previous = await evaluate(`(() => {
     const rule=document.createElement('style');rule.id='layout-old-height';

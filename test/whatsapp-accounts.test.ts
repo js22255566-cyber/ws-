@@ -116,10 +116,13 @@ describe('WhatsApp account adapter', () => {
       server: 'c.us',
     });
   });
-  it('retains host avatar only for a proven identical online owner', () => {
+  it('retains the last confirmed identity on logout, errors and incomplete observations', () => {
     const previous = {
       status: 'online' as const,
       ownerId: 'one@c.us',
+      nickname: 'Last user',
+      phone: '8613800000001',
+      unreadMessages: 8,
       avatar: 'data:image/png;base64,b3du',
     };
     expect(
@@ -130,14 +133,56 @@ describe('WhatsApp account adapter', () => {
       mergeAccountSnapshot(previous, { status: 'online', ownerId: 'two@c.us' })
         .avatar,
     ).toBeUndefined();
-    expect(
-      mergeAccountSnapshot(previous, { status: 'online' }).avatar,
-    ).toBeUndefined();
-    expect(
-      mergeAccountSnapshot(previous, {
-        status: 'logged-out',
+    for (const status of [
+      'logged-out',
+      'loading',
+      'error',
+      'online',
+    ] as const) {
+      const next = mergeAccountSnapshot(previous, { status });
+      expect(next).toMatchObject({
+        status,
         ownerId: 'one@c.us',
-      }).avatar,
+        nickname: 'Last user',
+        phone: '8613800000001',
+        avatar: previous.avatar,
+      });
+      expect(next.unreadMessages).toBeUndefined();
+    }
+    const replaced = mergeAccountSnapshot(previous, {
+      status: 'online',
+      ownerId: 'two@c.us',
+      phone: '8613800000002',
+      nickname: 'New user',
+    });
+    expect(replaced).toMatchObject({
+      phone: '8613800000002',
+      nickname: 'New user',
+    });
+    expect(replaced.avatar).toBeUndefined();
+  });
+  it('recognizes the same account across its confirmed phone and LID identities', () => {
+    const previous = {
+      status: 'logged-out' as const,
+      ownerId: '8613800000001@c.us',
+      ownerIds: ['8613800000001@c.us', '90001@lid'],
+      nickname: 'Known',
+      phone: '8613800000001',
+      avatar: 'data:image/png;base64,b3du',
+    };
+    const resumed = mergeAccountSnapshot(previous, {
+      status: 'online',
+      ownerId: '90001@lid',
+    });
+    expect(resumed).toMatchObject({
+      status: 'online',
+      nickname: 'Known',
+      phone: previous.phone,
+      avatar: previous.avatar,
+    });
+    expect(
+      mergeAccountSnapshot(previous, { status: 'online', ownerId: '90002@lid' })
+        .phone,
     ).toBeUndefined();
   });
   it('counts actual unread messages in unmuted, unarchived groups and private chats only', async () => {

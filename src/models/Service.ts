@@ -1,7 +1,14 @@
 import { join } from 'node:path';
 import { webContents } from '@electron/remote';
 import { ipcRenderer } from 'electron';
-import { action, autorun, computed, makeObservable, observable } from 'mobx';
+import {
+  action,
+  autorun,
+  computed,
+  makeObservable,
+  observable,
+  runInAction,
+} from 'mobx';
 import type ElectronWebView from 'react-electron-web-view';
 
 import { needsToken } from '../api/apiBase';
@@ -14,7 +21,10 @@ import { ifUndefined } from '../jsUtils';
 import { downloadController } from './DownloadController';
 import type { IRecipe } from './Recipe';
 import UserAgent from './UserAgent';
-import type { AccountSnapshot } from '../features/accounts/whatsapp';
+import {
+  mergeAccountSnapshot,
+  type AccountSnapshot,
+} from '../features/accounts/whatsapp';
 
 const debug = require('../preload-safe-debug')('Ferdium:Service');
 
@@ -44,7 +54,7 @@ export default class Service {
 
   @observable isActive: boolean = false; // Is current webview active
 
-  // ZL-WA: live guest observations, never a saved claim that a session is online.
+  // ZL-WA: last confirmed identity, with session status from live observations.
   @observable accountSnapshot: AccountSnapshot = { status: 'loading' };
 
   @observable name: string = '';
@@ -259,6 +269,27 @@ export default class Service {
     autorun((): void => {
       this._setAutoRun();
     });
+    if (this.recipe.id === 'whatsapp' && this.id) this.restoreAccountProfile();
+  }
+
+  private async restoreAccountProfile(): Promise<void> {
+    try {
+      const profile = await ipcRenderer.invoke(
+        'account-tools-profile',
+        this.id,
+      );
+      // A delayed disk read must never replace an identity already confirmed
+      // by the live guest, or turn a cached identity into an online session.
+      if (profile && !this.accountSnapshot.ownerId)
+        runInAction(() => {
+          this.accountSnapshot = mergeAccountSnapshot(
+            { status: 'loading', ...profile },
+            this.accountSnapshot,
+          );
+        });
+    } catch (error) {
+      debug('Could not restore last WhatsApp identity', error);
+    }
   }
 
   @action _didStartLoading(): void {

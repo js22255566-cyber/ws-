@@ -35,14 +35,6 @@ const messages = defineMessages({
     id: 'settings.navigation.team',
     defaultMessage: 'Manage Team',
   },
-  releaseNotes: {
-    id: 'settings.navigation.releaseNotes',
-    defaultMessage: 'Release Notes',
-  },
-  supportFerdium: {
-    id: 'settings.navigation.supportFerdium',
-    defaultMessage: 'About Ferdium',
-  },
   logout: {
     id: 'settings.navigation.logout',
     defaultMessage: 'Logout',
@@ -166,26 +158,6 @@ class SettingsNavigation extends Component<IProps> {
                 stores!.app.updateStatusTypes.DOWNLOADED) && (
               <span className="update-available">•</span>
             )}
-        </NavLink>
-        <NavLink
-          to="/settings/releasenotes"
-          className={({ isActive }) =>
-            isActive
-              ? 'settings-navigation__link is-active'
-              : 'settings-navigation__link'
-          }
-        >
-          {intl.formatMessage(messages.releaseNotes)}
-        </NavLink>
-        <NavLink
-          to="/settings/support"
-          className={({ isActive }) =>
-            isActive
-              ? 'settings-navigation__link is-active'
-              : 'settings-navigation__link'
-          }
-        >
-          {intl.formatMessage(messages.supportFerdium)}
         </NavLink>
         <span className="settings-navigation__expander" />
         <button

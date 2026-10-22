@@ -73,6 +73,104 @@ describe('privileged account tools IPC', () => {
     jest.dontMock('../src/electron/accountTranslation');
     rmSync(root, { recursive: true, force: true });
   });
+  it('isolates group task storage, rejects guest frames and keeps the last snapshot if writing fails', () => {
+    const loaded = handlers['group-tools-load'](event);
+    expect(loaded.intervals).toEqual({ speech: 3, join: 5, leave: 5 });
+    expect(() =>
+      handlers['group-tools-load']({ ...event, senderFrame: {} }),
+    ).toThrow('禁止访问');
+    loaded.intervals.speech = 4;
+    handlers['group-tools-save'](event, loaded);
+    expect(
+      JSON.parse(readFileSync(join(root, 'group-tools.json'), 'utf8')).intervals
+        .speech,
+    ).toBe(4);
+    const copy = handlers['group-tools-load'](event);
+    copy.intervals.speech = 0;
+    expect(() => handlers['group-tools-save'](event, copy)).toThrow('执行间隔');
+    expect(handlers['group-tools-load'](event).intervals.speech).toBe(4);
+    rmSync(root, { recursive: true, force: true });
+    loaded.intervals.speech = 5;
+    expect(() => handlers['group-tools-save'](event, loaded)).toThrow();
+    expect(handlers['group-tools-load'](event).intervals.speech).toBe(4);
+  });
+
+  it('persists only the last confirmed identity per card and restores it after restart', async () => {
+    const original = {
+      status: 'online',
+      ownerId: '8613800000001@c.us',
+      phone: '8613800000001',
+      nickname: 'Known user',
+      avatar: 'data:image/png;base64,b3du',
+      unreadMessages: 9,
+    };
+    invoke('profile', 'card-a', original);
+    require('../src/electron/ipc-api/accountTools').default({ mainWindow });
+    expect(invoke('profile', 'card-a')).toMatchObject({
+      ownerId: original.ownerId,
+      phone: original.phone,
+      nickname: original.nickname,
+      avatar: original.avatar,
+    });
+    expect(invoke('profile', 'card-b')).toBeUndefined();
+    const saved = JSON.parse(
+      readFileSync(join(root, 'account-tools.json'), 'utf8'),
+    ).accountProfiles['card-a'];
+    expect(saved.status).toBeUndefined();
+    expect(saved.unreadMessages).toBeUndefined();
+    expect(() =>
+      invoke('profile', 'card-a', { status: 'logged-out' }),
+    ).toThrow();
+    expect(
+      invoke('profile', 'card-a', {
+        status: 'online',
+        ownerId: original.ownerId,
+      }),
+    ).toMatchObject({
+      phone: original.phone,
+      nickname: original.nickname,
+      avatar: original.avatar,
+    });
+    invoke('profile', 'card-a', {
+      status: 'online',
+      ownerId: '8613800000002@c.us',
+      phone: '8613800000002',
+      nickname: 'New user',
+    });
+    const changed = invoke('profile', 'card-a');
+    expect(changed).toMatchObject({
+      ownerId: '8613800000002@c.us',
+      phone: '8613800000002',
+      nickname: 'New user',
+    });
+    expect(changed.avatar).toBeUndefined();
+    await invoke('remove', 'card-a');
+    expect(invoke('profile', 'card-a')).toBeUndefined();
+  });
+  it('protects identity history from guest access, invalid pictures and failed writes', () => {
+    const original = {
+      status: 'online',
+      ownerId: '8613800000001@c.us',
+      phone: '8613800000001',
+      nickname: 'Known',
+    };
+    invoke('profile', 'card-a', original);
+    expect(() =>
+      invoke('profile', 'card-a', {
+        ...original,
+        avatar: 'https://example.invalid/picture',
+      }),
+    ).toThrow();
+    event.senderFrame = {};
+    expect(() => invoke('profile', 'card-a')).toThrow('禁止');
+    event.senderFrame = mainWindow.webContents.mainFrame;
+    rmSync(root, { recursive: true, force: true });
+    expect(() => invoke('profile', 'card-a', original)).not.toThrow();
+    expect(() =>
+      invoke('profile', 'card-a', { ...original, nickname: 'Changed' }),
+    ).toThrow();
+    expect(invoke('profile', 'card-a').nickname).toBe('Known');
+  });
   it('persists and restores bulk settings without storing recipients, content or an old scheduled date', () => {
     const saved = invoke('bulk-preferences', {
       type: 'video',

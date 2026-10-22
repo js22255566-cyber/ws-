@@ -634,6 +634,7 @@ export const DEFAULT_APP_SETTINGS = {
   userAgentPref: '',
   downloadFolderPath: '',
   adaptableDarkMode: true,
+  translationTextColor: '#ffe45c',
   accentColor: DEFAULT_ACCENT_COLOR,
   progressbarAccentColor: DEFAULT_ACCENT_COLOR,
   serviceRibbonWidth: 68,

@@ -9,6 +9,7 @@ import type { ApiInterface } from '../api';
 import { DEFAULT_ACCENT_COLOR } from '../config';
 import { type Theme, ThemeType, theme } from '../themes';
 import TypedStore from './lib/TypedStore';
+import { appThemeSource } from '../features/appearance/theme';
 
 export default class UIStore extends TypedStore {
   @observable showServicesUpdatedInfoBar = false;
@@ -29,13 +30,23 @@ export default class UIStore extends TypedStore {
     );
 
     // Listen for theme change
-    nativeTheme.on('updated', () => {
-      this.isOsDarkThemeActive = nativeTheme.shouldUseDarkColors;
-      this.actions.service.shareSettingsWithServiceProcess();
-    });
+    nativeTheme.on(
+      'updated',
+      action(() => {
+        this.isOsDarkThemeActive = nativeTheme.shouldUseDarkColors;
+        this.actions.service.shareSettingsWithServiceProcess();
+      }),
+    );
   }
 
   setup(): void {
+    reaction(
+      () => appThemeSource(this.stores.settings.app),
+      source => {
+        nativeTheme.themeSource = source;
+      },
+      { fireImmediately: true },
+    );
     reaction(
       () => this.isDarkThemeActive,
       () => {
@@ -92,20 +103,17 @@ export default class UIStore extends TypedStore {
   }
 
   @computed get theme(): Theme {
-    const themeId =
-      this.isDarkThemeActive || this.stores.settings.app.darkMode
-        ? ThemeType.dark
-        : ThemeType.default;
+    const themeId = this.isDarkThemeActive ? ThemeType.dark : ThemeType.default;
     const { accentColor } = this.stores.settings.app;
     return theme(themeId, accentColor);
   }
 
   @computed get muiTheme() {
-    const { accentColor, darkMode } = this.stores.settings.app;
+    const { accentColor } = this.stores.settings.app;
 
     return createTheme({
       palette: {
-        mode: darkMode ? 'dark' : 'light',
+        mode: this.isDarkThemeActive ? 'dark' : 'light',
         primary: {
           main: tinycolor(accentColor).isValid()
             ? accentColor

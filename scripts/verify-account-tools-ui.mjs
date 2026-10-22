@@ -4,6 +4,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { verifyGroups } from './verify-groups-ui.mjs';
 import {
   evaluate,
   wait,
@@ -40,12 +41,18 @@ execFileSync(
 const ids = [];
 let mainPatched = false;
 let sidebarBefore;
+let translationColorBefore;
+let themeBefore;
+let historyBefore;
+let historyBackupPath;
+let groupStateBefore;
 let bulkPreferencesBefore;
 let customersBefore;
 const vm = async code =>
   evaluate(
     `require('@electron/remote').require('node:vm').runInThisContext(${JSON.stringify(code)})`,
   );
+const queueExpression = `require('./features/accountTools/bulkRuntime').getBulkQueue(window.ferdium.stores)`;
 const service = id =>
   `window.ferdium.stores.services.one(${JSON.stringify(id)})`;
 const guest = (id, code) =>
@@ -73,6 +80,28 @@ try {
     await evaluate('window.ferdium.stores.services.all.some(s=>s.isEnabled)'),
     false,
     'Use an isolated test profile with no enabled real accounts',
+  );
+  if (!process.argv.includes('--customers-only')) {
+    historyBefore = await evaluate(
+      `require('electron').ipcRenderer.invoke('account-tools-history')`,
+    );
+    historyBackupPath = `/tmp/zl-wa-history-backup-${Date.now()}.json`;
+    writeFileSync(historyBackupPath, JSON.stringify(historyBefore));
+    await evaluate(
+      `(async()=>{const queue=${queueExpression};await queue.load();if(queue.activeId||queue.records.some(r=>r.status==='待发送'))throw Error('Use a test profile without active or scheduled jobs');await queue.remove(queue.records.map(r=>r.id));return true})()`,
+    );
+  }
+  groupStateBefore = await evaluate(
+    `require('electron').ipcRenderer.invoke('group-tools-load')`,
+  );
+  await evaluate(
+    `require('electron').ipcRenderer.invoke('group-tools-save',{batches:[],intervals:{speech:3,join:5,leave:5}})`,
+  );
+  themeBefore = await evaluate(
+    `(()=>{const {darkMode,adaptableDarkMode,universalDarkMode}=window.ferdium.stores.settings.app;return {darkMode,adaptableDarkMode,universalDarkMode}})()`,
+  );
+  translationColorBefore = await evaluate(
+    'window.ferdium.stores.settings.app.translationTextColor',
   );
   sidebarBefore = await evaluate(
     'JSON.parse(JSON.stringify(window.ferdium.stores.settings.app.accountSidebar || {}))',
@@ -212,6 +241,144 @@ try {
     'PASS account card drag reorders and persists local preferences without replacing accounts',
   );
   await click(`[data-service-id="${first}"] .account-card__select`);
+  const viewsBeforeFold = await evaluate(
+    `[${ids.map(id => `${service(id)}.webview?.getWebContentsId()`).join(',')}]`,
+  );
+  await click('[aria-label="折叠账户栏"]');
+  await wait(
+    `document.querySelector('.account-sidebar')?.classList.contains('is-collapsed')`,
+    'sidebar collapsed',
+  );
+  const compact = await evaluate(
+    `(()=>{const side=document.querySelector('.account-sidebar');const card=side.querySelector('[data-service-id="${first}"]');const visible=e=>e.getBoundingClientRect().width>0&&e.getBoundingClientRect().height>0;return {width:side.getBoundingClientRect().width,portrait:visible(card.querySelector('.account-card__portrait')),remark:visible(card.querySelector('.account-card__remark')),identity:visible(card.querySelector('.account-card__identity')),saved:window.ferdium.stores.settings.app.accountSidebar.collapsed}})()`,
+  );
+  assert.equal(compact.width, 84);
+  assert(
+    compact.portrait && compact.remark && !compact.identity && compact.saved,
+  );
+  assert.deepEqual(
+    await evaluate(
+      `[${ids.map(id => `${service(id)}.webview?.getWebContentsId()`).join(',')}]`,
+    ),
+    viewsBeforeFold,
+    'folding must preserve webviews',
+  );
+  // Respect the existing 250 ms post-drag click suppression.
+  await new Promise(resolve => {
+    setTimeout(resolve, 300);
+  });
+  await click(`[data-service-id="${second}"] .account-card__remark`);
+  await wait(
+    `document.querySelector('[data-service-id="${second}"]').classList.contains('is-active')`,
+    'compact remark selects account',
+  );
+  assert.equal(
+    await evaluate(`!!document.querySelector('.account-dialog')`),
+    false,
+  );
+  await shot('/workspace/ZL-WA-sidebar-compact.png');
+  await click('[aria-label="展开账户栏"]');
+  await wait(
+    `!document.querySelector('.account-sidebar')?.classList.contains('is-collapsed')`,
+    'sidebar expanded',
+  );
+  assert.equal(
+    await evaluate(
+      `document.querySelector('.account-sidebar__footer').textContent.includes('下载')`,
+    ),
+    false,
+  );
+  await click(`[data-service-id="${first}"] .account-card__select`);
+  console.log(
+    'PASS compact sidebar persists, shows avatar/remark, switches accounts and preserves webview instances',
+  );
+  // Use the actual nativeTheme in a light desktop, not just a dark CSS fixture.
+  await evaluate(
+    `window.ferdium.stores.settings._update({type:'app',data:{darkMode:false,adaptableDarkMode:true,universalDarkMode:false}})`,
+  );
+  await wait(
+    `!window.ferdium.stores.ui.isDarkThemeActive`,
+    'light system theme baseline',
+  );
+  await guest(
+    first,
+    `(()=>{const style=document.createElement('style');style.id='fixture-theme-rules';style.textContent='html.dark #fixture-theme-probe{background:rgb(17,27,33);color:rgb(233,237,239)}html.light #fixture-theme-probe{background:rgb(255,255,255);color:rgb(17,17,17)}';document.head.append(style);const node=document.createElement('div');node.id='fixture-theme-probe';node.style.position='absolute';node.style.left='-9999px';document.body.append(node);return true})()`,
+  );
+  await click('.account-sidebar__footer button');
+  await wait(`!!document.querySelector('#appearance')`, 'theme appearance tab');
+  await click('#appearance');
+  await wait(
+    `!!document.querySelector('input[name="darkMode"]')`,
+    'manual dark toggle visible while following system',
+  );
+  const draftBeforeThemeTest = await guest(
+    first,
+    `(()=>{const input=document.querySelector('#main footer [contenteditable]');const old=input.textContent;input.textContent='unsent theme draft';return old})()`,
+  );
+  await click('input[name="darkMode"]');
+  await wait(
+    `window.ferdium.stores.settings.app.darkMode && !window.ferdium.stores.settings.app.adaptableDarkMode && document.body.classList.contains('theme__dark') && window.ferdium.stores.ui.muiTheme.palette.mode==='dark'`,
+    'manual dark switches app and MUI without OS dark',
+  );
+  await wait(
+    `matchMedia('(prefers-color-scheme: dark)').matches`,
+    'Chromium theme signal dark',
+  );
+  assert.equal(
+    await vm(
+      `process.getBuiltinModule('module').createRequire(process.cwd()+'/package.json')('electron').nativeTheme.themeSource`,
+    ),
+    'dark',
+  );
+  await wait(
+    `${service(first)}.webview.executeJavaScript("matchMedia('(prefers-color-scheme: dark)').matches && document.documentElement.classList.contains('dark') && document.body.classList.contains('dark') && getComputedStyle(document.querySelector('#fixture-theme-probe')).backgroundColor==='rgb(17, 27, 33)'")`,
+    'native WhatsApp theme classes dark',
+  );
+  const draftsBeforeTheme = await guest(
+    first,
+    `document.querySelector('#main footer [contenteditable]').textContent`,
+  );
+  await guest(
+    first,
+    `document.documentElement.classList.replace('dark','light');document.body.classList.replace('dark','light');document.documentElement.dataset.theme='light';document.body.dataset.appTheme='light';true`,
+  );
+  await wait(
+    `${service(first)}.webview.executeJavaScript("document.documentElement.classList.contains('dark') && !document.body.classList.contains('light') && document.documentElement.dataset.theme==='dark' && document.body.dataset.appTheme==='dark'")`,
+    'late native light-theme reset repaired without refresh',
+  );
+  assert.equal(
+    await guest(
+      first,
+      `document.querySelector('#main footer [contenteditable]').textContent`,
+    ),
+    draftsBeforeTheme,
+  );
+  assert.equal(draftsBeforeTheme, 'unsent theme draft');
+  await guest(
+    first,
+    `document.querySelector('#main footer [contenteditable]').textContent=${JSON.stringify(draftBeforeThemeTest)};true`,
+  );
+  await click('input[name="adaptableDarkMode"]');
+  await wait(
+    `!window.ferdium.stores.settings.app.darkMode && window.ferdium.stores.settings.app.adaptableDarkMode && !document.body.classList.contains('theme__dark') && !matchMedia('(prefers-color-scheme: dark)').matches && window.ferdium.stores.ui.muiTheme.palette.mode==='light'`,
+    'following a light system restores app and MUI light',
+  );
+  await click('input[name="universalDarkMode"]');
+  await wait(
+    `window.ferdium.stores.settings.app.darkMode && !window.ferdium.stores.settings.app.adaptableDarkMode && document.body.classList.contains('theme__dark')`,
+    'enabling compatibility dark also enables manual dark',
+  );
+  await click('.settings__close');
+  await evaluate(
+    `window.ferdium.stores.settings._update({type:'app',data:${JSON.stringify(themeBefore)}})`,
+  );
+  await guest(
+    first,
+    `document.querySelector('#fixture-theme-probe').remove();document.querySelector('#fixture-theme-rules').remove();true`,
+  );
+  console.log(
+    'PASS light desktop: manual dark updates app, MUI, Chromium and native WhatsApp classes; delayed light reset repaired; system-follow and compatibility switches work without reload or draft loss',
+  );
   if (!process.argv.includes('--customers-only')) {
     // Use native mouse/keyboard input and screen coordinates: DOM-only clicks
     // cannot catch a focus sentinel pushing the whole dialog off-screen.
@@ -423,6 +590,106 @@ try {
     await wait(
       `${service(first)}.webview.executeJavaScript('[...document.querySelectorAll("[data-zl-translation-text]")].every(n=>n.textContent.includes("你好"))')`,
       'cached previews restore both directions',
+    );
+    await click('.account-sidebar__footer button');
+    await wait(`!!document.querySelector('.settings__close')`, 'settings open');
+    assert.equal(
+      await evaluate(
+        `document.querySelectorAll('.settings-navigation a[href*="releasenotes"],.settings-navigation a[href*="support"]').length`,
+      ),
+      0,
+    );
+    await click('#appearance');
+    await wait(
+      `!!document.querySelector('input[name="translationTextColor"]')`,
+      'translation color picker',
+    );
+    const editColor = async value => {
+      const point = await evaluate(
+        `(()=>{const input=document.querySelector('input[name="translationTextColor"]');input.scrollIntoView({block:'center'});const r=input.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()`,
+      );
+      await call('Input.dispatchMouseEvent', {
+        type: 'mousePressed',
+        ...point,
+        button: 'left',
+        buttons: 1,
+        clickCount: 1,
+      });
+      await call('Input.dispatchMouseEvent', {
+        type: 'mouseReleased',
+        ...point,
+        button: 'left',
+        buttons: 0,
+        clickCount: 1,
+      });
+      await wait(
+        `document.activeElement?.name==='translationTextColor'`,
+        'color input focused',
+      );
+      await call('Input.dispatchKeyEvent', {
+        type: 'keyDown',
+        key: 'a',
+        code: 'KeyA',
+        windowsVirtualKeyCode: 65,
+        modifiers: 2,
+      });
+      await call('Input.dispatchKeyEvent', {
+        type: 'keyUp',
+        key: 'a',
+        code: 'KeyA',
+        windowsVirtualKeyCode: 65,
+        modifiers: 2,
+      });
+      if (value) await call('Input.insertText', { text: value });
+      else {
+        await call('Input.dispatchKeyEvent', {
+          type: 'keyDown',
+          key: 'Backspace',
+          code: 'Backspace',
+          windowsVirtualKeyCode: 8,
+        });
+        await call('Input.dispatchKeyEvent', {
+          type: 'keyUp',
+          key: 'Backspace',
+          code: 'Backspace',
+          windowsVirtualKeyCode: 8,
+        });
+      }
+      await click('.settings__settings-group__apply-color__button');
+    };
+    const translationCallsBeforeColor = await vm(
+      'globalThis.__zlTranslationCalls',
+    );
+    await editColor('#1685c7');
+    await wait(
+      `window.ferdium.stores.settings.app.translationTextColor==='#1685c7'`,
+      'translation color saved',
+    );
+    await wait(
+      `${service(first)}.webview.executeJavaScript("[...document.querySelectorAll('[data-zl-translation-text]')].some(e=>e.textContent)&&[...document.querySelectorAll('[data-zl-translation-text]')].every(e=>getComputedStyle(e).color==='rgb(22, 133, 199)')")`,
+      'existing translations recolored',
+    );
+    assert.equal(
+      await vm('globalThis.__zlTranslationCalls'),
+      translationCallsBeforeColor,
+      'color change must not request translations again',
+    );
+    await shot('/workspace/ZL-WA-translation-color.png');
+    await click('.settings__close');
+    await click('.account-sidebar__footer button');
+    await click('#appearance');
+    await wait(
+      `document.querySelector('input[name="translationTextColor"]')?.value==='#1685c7'`,
+      'color restored after reopening settings',
+    );
+    await editColor('');
+    await wait(
+      `window.ferdium.stores.settings.app.translationTextColor==='#ffe45c'`,
+      'empty color restores default',
+    );
+    await click('.settings__close');
+    console.log(
+      'PASS appearance color saves/reopens, updates existing translations without provider calls, empty value restores default; release/about/download links hidden',
     );
     await shot('/workspace/ZL-WA-message-preview.png');
     await switchTranslation('接收翻译（收发消息）');
@@ -1314,6 +1581,94 @@ try {
     ownAvatar,
     'temporary missing thumbnail must not clear an own-account avatar',
   );
+  const historyProfile = await evaluate(
+    `JSON.parse(JSON.stringify(${service(first)}.accountSnapshot))`,
+  );
+  const pollIdentity = async () =>
+    evaluate(
+      `${service(first)}.webview.dispatchEvent(new Event('did-stop-loading'))`,
+    );
+  for (const [socketState, status] of [
+    ['UNPAIRED', 'logged-out'],
+    ['TIMEOUT', 'error'],
+  ]) {
+    await guest(
+      first,
+      `window.require('WAWebSocketModel').Socket.state=${JSON.stringify(socketState)};true`,
+    );
+    await pollIdentity();
+    await wait(
+      `${service(first)}.accountSnapshot.status===${JSON.stringify(status)}`,
+      'actual logout/error status',
+    );
+    assert.equal(
+      await evaluate(`${service(first)}.accountSnapshot.phone`),
+      historyProfile.phone,
+    );
+    assert.equal(
+      await evaluate(`${service(first)}.accountSnapshot.nickname`),
+      historyProfile.nickname,
+    );
+    assert.equal(
+      await evaluate(
+        `document.querySelector('[data-service-id="${first}"] .account-card__portrait img')?.src`,
+      ),
+      ownAvatar,
+    );
+    assert(
+      !(await evaluate(
+        `document.querySelector('[data-service-id="${first}"]').textContent.includes('待同步')`,
+      )),
+    );
+  }
+  await guest(
+    first,
+    `window.require('WAWebSocketModel').Socket.state='CONNECTED';fixture.ownPhone='8613800000003';window.require('WAWebConnModel').Conn.pushname='新登录测试账号';true`,
+  );
+  await pollIdentity();
+  await wait(
+    `${service(first)}.accountSnapshot.phone==='8613800000003' && ${service(first)}.accountSnapshot.nickname==='新登录测试账号'`,
+    'new owner replaces historical phone and nickname',
+  );
+  assert.equal(
+    await evaluate(`${service(first)}.accountSnapshot.avatar`),
+    undefined,
+    'new owner cannot inherit old owner avatar',
+  );
+  const storedIdentity = await evaluate(
+    `require('electron').ipcRenderer.invoke('account-tools-profile','${first}')`,
+  );
+  assert.equal(storedIdentity.ownerId, '8613800000003@c.us');
+  assert.equal(storedIdentity.avatar, undefined);
+  const restoredCard = await evaluate(`(async () => {
+    const current=${service(first)};
+    const restored=new current.constructor({id:current.id,name:'Restored offline card',isEnabled:false},current.recipe);
+    for(let i=0;i<40 && !restored.accountSnapshot.ownerId;i+=1) await new Promise(resolve=>setTimeout(resolve,50));
+    return JSON.parse(JSON.stringify(restored.accountSnapshot));
+  })()`);
+  assert.equal(
+    restoredCard.phone,
+    '8613800000003',
+    'a recreated offline card loads its saved identity',
+  );
+  assert.equal(restoredCard.nickname, '新登录测试账号');
+  assert.equal(
+    restoredCard.status,
+    'loading',
+    'history restoration never claims the account is online',
+  );
+  await guest(
+    first,
+    `fixture.ownPhone=${JSON.stringify(historyProfile.phone)};fixture.ownAvatar=${JSON.stringify(ownAvatar)};window.require('WAWebConnModel').Conn.pushname=${JSON.stringify(historyProfile.nickname)};true`,
+  );
+  await pollIdentity();
+  await wait(
+    `${service(first)}.accountSnapshot.phone===${JSON.stringify(historyProfile.phone)} && !!${service(first)}.accountSnapshot.avatar`,
+    'original account can log back into the same card',
+  );
+  console.log(
+    'PASS logout and errors keep historical card identity; new login replaces it without mixing the old avatar',
+  );
   await clickText('客户');
   await wait(
     `!!document.querySelector('#customer-remark-name')`,
@@ -1338,6 +1693,20 @@ try {
     `${service(first)}.unreadDirectMessageCount===7 && ${service(first)}.unreadIndirectMessageCount===0`,
     'actual unread message counts',
   );
+  assert.equal(
+    await evaluate(
+      `getComputedStyle(document.querySelector('[data-service-id="${first}"] .account-card__unread')).color`,
+    ),
+    'rgb(229, 57, 53)',
+    'account unread digits are red',
+  );
+  assert.equal(
+    await evaluate(
+      `getComputedStyle(document.querySelector('[data-service-id="${first}"] .account-card__unread')).backgroundColor`,
+    ),
+    'rgba(0, 0, 0, 0)',
+    'account unread count has no background',
+  );
   await guest(first, `fixture.chats[0].muteExpiration=-1;true`);
   await wait(
     `${service(first)}.unreadDirectMessageCount===3`,
@@ -1350,18 +1719,81 @@ try {
   assert.equal(
     await guest(
       first,
+      `document.querySelector('#main header').textContent.includes('红色客户备注')`,
+    ),
+    false,
+    'customer remark stays out of the native conversation header',
+  );
+
+  assert.equal(
+    await guest(
+      first,
       `document.body.textContent.includes('仅客户面板显示的长备注')`,
     ),
     false,
   );
   const layout = await guest(
     first,
-    `(()=>{const r=document.querySelector('[data-id="10002@c.us"][role=row]');return [r.getBoundingClientRect().height,r.querySelector('[title]').getBoundingClientRect().bottom,r.querySelector('.zl-chat-note').getBoundingClientRect().top,r.querySelector('.zl-chat-note').getBoundingClientRect().bottom,r.querySelector('.fixture-preview').getBoundingClientRect().top]})()`,
+    `(()=>{const r=document.querySelector('[data-id="10002@c.us"][role=row]');const name=r.querySelector('[title]').getBoundingClientRect();const input=r.querySelector('.zl-chat-note');const note=input.getBoundingClientRect();const preview=r.querySelector('.fixture-preview').getBoundingClientRect();const style=getComputedStyle(input);return [r.getBoundingClientRect().height,name.bottom,note.top,note.bottom,preview.top,name.left,note.left,style.textIndent,style.fontSize,preview.bottom,r.getBoundingClientRect().bottom]})()`,
   );
   assert.equal(layout[0], 72);
   assert(
     layout[1] <= layout[2] && layout[3] <= layout[4],
     JSON.stringify(layout),
+  );
+  assert(
+    layout[2] - layout[1] <= 2 && layout[4] - layout[3] <= 2,
+    'name, remark and preview have compact gaps',
+  );
+  assert(
+    Math.abs(layout[5] - layout[6]) < 1,
+    'remark aligns with the name despite native row borders',
+  );
+  assert.equal(layout[7], '0px', 'native input text indentation is reset');
+  assert.equal(layout[8], '11px', 'remark stays smaller than the native title');
+  assert(
+    layout[9] <= layout[10],
+    'preview stays inside the original virtual row',
+  );
+  const compactCheck = `(() => {
+    const row=document.querySelector('[data-id="10002@c.us"][role=row]');
+    const input=row?.querySelector('.zl-chat-note');
+    if(!input)return false;
+    const name=row.querySelector('[title]').getBoundingClientRect();
+    const note=input.getBoundingClientRect();
+    const preview=row.querySelector('.fixture-preview').getBoundingClientRect();
+    return note.width>20 && Math.abs(note.left-name.left)<1 &&
+      note.top>=name.bottom && note.top-name.bottom<=2 &&
+      preview.top>=note.bottom && preview.top-note.bottom<=2;
+  })()`;
+  const beforeReflow = await guest(first, `window.__zlCustomers.data.revision`);
+  await guest(
+    first,
+    `(() => {
+    const style=document.createElement('style');style.id='fixture-delayed-login-layout';
+    style.textContent='#side{width:240px}.fixture-chat{border-left-width:13px}.fixture-title{height:26px;font-size:18px}.fixture-preview{margin-top:20px}';
+    document.head.append(style);return true;
+  })()`,
+  );
+  await wait(
+    `(async()=>await ${service(first)}.webview.executeJavaScript(${JSON.stringify(compactCheck)}))()`,
+    'late login styles and sidebar resize automatically recalculate compact remarks',
+  );
+  assert.equal(
+    await guest(first, `window.__zlCustomers.data.revision`),
+    beforeReflow,
+    'layout reflow does not require a profile edit or page refresh',
+  );
+  await guest(
+    first,
+    `document.querySelector('#fixture-delayed-login-layout').remove();true`,
+  );
+  await wait(
+    `(async()=>await ${service(first)}.webview.executeJavaScript(${JSON.stringify(compactCheck)}))()`,
+    'restoring native dimensions recalculates layout again',
+  );
+  console.log(
+    'PASS compact alignment survives delayed login styles and sidebar resize without editing data or refreshing',
   );
   assert.equal(
     await guest(
@@ -1487,13 +1919,53 @@ try {
     );
     await guest(
       first,
-      `(()=>{fixture.menuRole='${id === '10004@c.us' ? 'button' : 'menuitem'}';fixture.chineseMenu=${id === '10004@c.us'};const menu=document.querySelector('[role=row][data-id="${id}"] [data-testid=native-chat-menu]');menu.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true}));menu.click();const item=document.querySelector('[data-testid=native-pin-item]');item.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,cancelable:true}));if(item.isConnected)item.dispatchEvent(new MouseEvent('mousedown',{bubbles:true,cancelable:true}));if(item.isConnected)item.click();return true})()`,
+      `(()=>{fixture.barePinItem=${id === '10003@c.us'};fixture.menuRole='${id === '10004@c.us' ? 'button' : 'menuitem'}';fixture.chineseMenu=${id === '10004@c.us'};const menu=document.querySelector('[role=row][data-id="${id}"] [data-testid=native-chat-menu]');if('${id}'==='10004@c.us'){const row=menu.closest('[role=row]');delete row.dataset.id;row.querySelector('[title]').title='not a unique chat title';}menu.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true}));menu.click();const item=document.querySelector('[data-testid=native-pin-item]');item.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,cancelable:true}));if(item.isConnected)item.dispatchEvent(new MouseEvent('mousedown',{bubbles:true,cancelable:true}));if(item.isConnected)item.click();return true})()`,
     );
     await wait(
       `(async()=>{return await ${service(first)}.webview.executeJavaScript("document.querySelector('#pane-side [role=row]')?.dataset.id === '${id}'")})()`,
       'newest pin first',
     );
   }
+  // Bypass all DOM event interception, as keyboard/native command actions do.
+  // Lazily loaded exports must be hooked before a fourth+ native guard runs.
+  await guest(
+    first,
+    `fixture.barePinItem=false;fixture.loadPinCommands();true`,
+  );
+  await new Promise(resolve => {
+    setTimeout(resolve, 1400);
+  });
+  for (const id of ['10006@c.us', '10007@c.us']) {
+    await guest(first, `fixture.nativePinCommand('${id}').then(()=>true)`);
+    await wait(
+      `(async()=>await ${service(first)}.webview.executeJavaScript("document.querySelector('#pane-side [role=row]')?.dataset.id === '${id}'"))()`,
+      'command pin beyond native limit renders in original list',
+    );
+  }
+  assert.equal(await guest(first, `fixture.nativePinServerCalls || 0`), 0);
+  assert.equal(await guest(first, `fixture.nativePinLimitDialogs || 0`), 0);
+  assert.equal(
+    await guest(first, `require('WAWebFixtureMsgPinAction').getPinLimit()`),
+    3,
+  );
+  assert.equal(
+    await guest(
+      first,
+      `require('WAWebFixtureFrozenChatPinAction').getPinLimit()`,
+    ),
+    3,
+  );
+  for (const id of ['10007@c.us', '10006@c.us']) {
+    await guest(first, `fixture.nativePinCommand('${id}').then(()=>true)`);
+    await wait(
+      `(async()=>await ${service(first)}.webview.executeJavaScript(${JSON.stringify(`!document.querySelector('[role=row][data-id="${id}"] [data-icon=pinned]')`)}))()`,
+      'native command unpin removes original glyph',
+    );
+  }
+  assert.equal(await guest(first, `fixture.nativePinServerCalls || 0`), 0);
+  console.log(
+    'PASS native command guard beyond three pins, local unpin, no server pin calls, immutable and message modules preserved',
+  );
   const order = await guest(
     first,
     `[...document.querySelectorAll('#pane-side [role=row]')].filter(n=>n.querySelector('[data-icon=pinned]')).map(n=>n.dataset.id)`,
@@ -1557,6 +2029,10 @@ try {
     `(async()=>await ${service(first)}.webview.executeJavaScript("document.querySelector('#pane-side [role=row]')?.dataset.id === '10004@c.us'"))()`,
     'native pinned order survives virtual row remount',
   );
+  await wait(
+    `(async()=>await ${service(first)}.webview.executeJavaScript("[...document.querySelectorAll('#pane-side [role=row]')].every(row=>!!row.querySelector('.zl-chat-note'))"))()`,
+    'remarks hydrated after native row remount',
+  );
   await shot('/workspace/ZL-WA-customers.png');
   await click(`[data-service-id="${second}"] .account-card__select`);
   await guest(
@@ -1571,6 +2047,21 @@ try {
   console.log(
     'PASS own-avatar cache, private context fallback, group form exclusion, inline note Enter/autosave/Escape, multi-labels, layout, profile isolation, pins and unread counts',
   );
+  await wait(
+    `${service(second)}.accountSnapshot.phone==='8613800000002'`,
+    'second account identity ready for group tools',
+  );
+  await verifyGroups({
+    first,
+    second,
+    guest,
+    evaluate,
+    wait,
+    click,
+    clickText,
+    call,
+    shot,
+  });
   // Delete only fixtures created by this run, using the existing real delete action.
   for (const id of ids) {
     await evaluate(
@@ -1586,6 +2077,12 @@ try {
   );
 } catch (error) {
   console.error(error);
+  console.error(
+    'Dialog diagnostic',
+    await evaluate(
+      `({notice:document.querySelector('.tools-notice')?.textContent,latest:document.querySelector('.bulk-history tbody tr:first-child')?.textContent,groups:document.querySelector('.group-tools-results')?.textContent})`,
+    ),
+  );
   for (const id of ids) {
     try {
       console.error(
@@ -1607,6 +2104,51 @@ try {
   }
   process.exitCode = 1;
 } finally {
+  if (groupStateBefore) {
+    try {
+      await evaluate(
+        `(async()=>{const queue=require('./features/groups/runtime').getGroupRuntime(window.ferdium.stores).queue;if(queue.active)throw Error('Group test queue is still active');queue.state=${JSON.stringify(groupStateBefore)};await require('electron').ipcRenderer.invoke('group-tools-save',queue.state);queue.notify();return true})()`,
+      );
+    } catch (error) {
+      console.error('Unable to restore group test state', error);
+      process.exitCode = 1;
+    }
+  }
+  if (historyBefore) {
+    try {
+      await evaluate(
+        `(async()=>{const queue=${queueExpression};if(queue.activeId)throw Error('Test queue is still active');const ipc=require('electron').ipcRenderer;await queue.remove(queue.records.map(r=>r.id));for(const record of ${JSON.stringify([...historyBefore].reverse())})await ipc.invoke('account-tools-history',record);queue.records=await ipc.invoke('account-tools-history');queue.notify();return true})()`,
+      );
+      console.log(
+        'PASS original forwarding history restored after isolated GUI tests',
+      );
+      rmSync(historyBackupPath, { force: true });
+    } catch (error) {
+      console.error(
+        `Unable to restore GUI test history; backup: ${historyBackupPath}`,
+        error,
+      );
+      process.exitCode = 1;
+    }
+  }
+  if (themeBefore) {
+    try {
+      await evaluate(
+        `window.ferdium.stores.settings._update({type:'app',data:${JSON.stringify(themeBefore)}})`,
+      );
+    } catch {
+      /* Preserve original failure. */
+    }
+  }
+  if (translationColorBefore !== undefined) {
+    try {
+      await evaluate(
+        `window.ferdium.stores.settings._update({type:'app',data:{translationTextColor:${JSON.stringify(translationColorBefore)}}})`,
+      );
+    } catch {
+      /* Preserve original failure. */
+    }
+  }
   if (sidebarBefore) {
     try {
       await evaluate(

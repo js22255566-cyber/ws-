@@ -13,7 +13,6 @@ import {
 import tinycolor from 'tinycolor2';
 import GitHubUpdatesPanel from '../../../features/updates/GitHubUpdatesPanel';
 import {
-  DEFAULT_ACCENT_COLOR,
   DEFAULT_APP_SETTINGS,
   FERDIUM_TRANSLATION,
   GITHUB_FERDIUM_URL,
@@ -389,15 +388,18 @@ class EditSettingsForm extends Component<IProps, IState> {
     this.setState({ clearCacheButtonClicked: true });
   };
 
-  resetColorOnEmptyInput(name: string): void {
+  resetColorOnEmptyInput(
+    name: 'accentColor' | 'progressbarAccentColor' | 'translationTextColor',
+  ): void {
     if (this.props.form.$(name).value.trim().length === 0) {
-      this.props.form.$(name).set(DEFAULT_ACCENT_COLOR);
+      this.props.form.$(name).set(DEFAULT_APP_SETTINGS[name]);
     }
   }
 
   resetColorsFromSettings(): void {
-    const { accentColor, progressbarAccentColor } =
+    const { accentColor, progressbarAccentColor, translationTextColor } =
       window['ferdium'].stores.settings.app;
+    this.props.form.$('translationTextColor').set(translationTextColor);
     this.props.form.$('accentColor').set(accentColor);
     this.props.form.$('progressbarAccentColor').set(progressbarAccentColor);
   }
@@ -407,20 +409,47 @@ class EditSettingsForm extends Component<IProps, IState> {
       e.preventDefault();
     }
 
+    // An explicit theme choice exits system-following mode. Compatibility
+    // dark mode must also turn the theme on, rather than remain inert on light OSes.
+    const changed = e?.target?.name;
+    if (changed === 'darkMode')
+      this.props.form.$('adaptableDarkMode').set(false);
+    if (
+      changed === 'adaptableDarkMode' &&
+      this.props.form.$('adaptableDarkMode').value
+    )
+      this.props.form.$('darkMode').set(false);
+    if (
+      changed === 'universalDarkMode' &&
+      this.props.form.$('universalDarkMode').value
+    ) {
+      this.props.form.$('darkMode').set(true);
+      this.props.form.$('adaptableDarkMode').set(false);
+    }
+
     // Reset color to default if input is empty
+    this.resetColorOnEmptyInput('translationTextColor');
     this.resetColorOnEmptyInput('accentColor');
     this.resetColorOnEmptyInput('progressbarAccentColor');
 
+    const tinyTranslationColor = tinycolor(
+      this.props.form.$('translationTextColor').value,
+    );
     const tinyAccentColor = tinycolor(this.props.form.$('accentColor').value);
     const tinyProgressbarAccentColor = tinycolor(
       this.props.form.$('progressbarAccentColor').value,
     );
 
     // Do not submit if one of the accent color is not set and the action is the change of color
-    if (!tinyAccentColor.isValid() || !tinyProgressbarAccentColor.isValid()) {
+    if (
+      !tinyAccentColor.isValid() ||
+      !tinyProgressbarAccentColor.isValid() ||
+      !tinyTranslationColor.isValid()
+    ) {
       if (
-        e.target.name === 'accentColor' ||
-        e.target.name === 'progressbarAccentColor'
+        e?.target?.name === 'translationTextColor' ||
+        e?.target?.name === 'accentColor' ||
+        e?.target?.name === 'progressbarAccentColor'
       ) {
         return;
       }
@@ -436,6 +465,9 @@ class EditSettingsForm extends Component<IProps, IState> {
         const { isTwoFactorAutoCatcherEnabled } = values;
 
         // react-color does not work well with named colors, so we pass their hex value instead
+        if (tinyTranslationColor.getFormat() === 'name') {
+          values.translationTextColor = tinyTranslationColor.toHexString();
+        }
         if (tinyAccentColor.getFormat() === 'name') {
           values.accentColor = tinyAccentColor.toHexString();
         }
@@ -851,9 +883,10 @@ class EditSettingsForm extends Component<IProps, IState> {
                 {isMac && <Toggle {...form.$('showDragArea').bind()} />}
 
                 <Toggle {...form.$('adaptableDarkMode').bind()} />
-                {!isAdaptableDarkModeEnabled && (
-                  <Toggle {...form.$('darkMode').bind()} />
-                )}
+                <Toggle {...form.$('darkMode').bind()} />
+                <p className="settings__message">
+                  手动切换暗色模式会关闭跟随系统，网页也会同步切换。
+                </p>
                 {(isDarkmodeEnabled || isAdaptableDarkModeEnabled) && (
                   <>
                     <Toggle {...form.$('universalDarkMode').bind()} />
@@ -894,6 +927,32 @@ class EditSettingsForm extends Component<IProps, IState> {
                   {intl.formatMessage(messages.accentColorInfo, {
                     defaultAccentColor: DEFAULT_APP_SETTINGS.accentColor,
                   })}
+                </p>
+                <p>翻译文字颜色</p>
+                <div
+                  className="settings__settings-group__apply-color"
+                  data-translation-color-picker
+                >
+                  <ColorPickerInput
+                    {...form.$('translationTextColor').bind()}
+                    name="translationTextColor"
+                    onColorChange={e => this.submit(e)}
+                    className="color-picker-input"
+                  />
+                </div>
+                <p
+                  style={{
+                    color: tinycolor(
+                      form.$('translationTextColor').value,
+                    ).isValid()
+                      ? form.$('translationTextColor').value
+                      : DEFAULT_APP_SETTINGS.translationTextColor,
+                  }}
+                >
+                  译文预览：你好，欢迎联系我。
+                </p>
+                <p>
+                  应用于聊天中的翻译文字，所有账户共用；清空后恢复默认颜色。
                 </p>
                 <p>{intl.formatMessage(messages.overallTheme)}</p>
                 <div className="settings__settings-group__apply-color">

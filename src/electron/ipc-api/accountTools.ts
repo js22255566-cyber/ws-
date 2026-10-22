@@ -30,6 +30,14 @@ import {
   normalizeBulkPreferences,
   type BulkPreferences,
 } from '../../features/accountTools/bulkPreferences';
+import {
+  accountIdentity,
+  mergeAccountSnapshot,
+  type AccountIdentity,
+  type AccountSnapshot,
+} from '../../features/accounts/whatsapp';
+
+import initGroupTools from './groupTools';
 
 type StoredConfig = ToolsConfig & {
   encryptedPassword?: string;
@@ -37,6 +45,8 @@ type StoredConfig = ToolsConfig & {
 };
 const decrypt = (value?: string) =>
   value ? safeStorage.decryptString(Buffer.from(value, 'base64')) : '';
+const validProfileOwner = (owner: unknown) =>
+  typeof owner === 'string' && /^\d{5,30}@(c\.us|lid)$/.test(owner);
 const encrypt = (value: string) => {
   if (
     !safeStorage.isEncryptionAvailable() ||
@@ -57,6 +67,7 @@ export default ({ mainWindow }: { mainWindow: BrowserWindow }) => {
     accounts: Record<string, StoredConfig>;
     history: SendRecord[];
     bulkPreferences?: BulkPreferences;
+    accountProfiles?: Record<string, AccountIdentity>;
   } = { accounts: {}, history: [] };
   if (existsSync(path)) {
     try {
@@ -78,6 +89,7 @@ export default ({ mainWindow }: { mainWindow: BrowserWindow }) => {
     if (id !== undefined && !/^[\da-z-]{1,100}$/i.test(id))
       throw new Error('无效账号');
   };
+  initGroupTools(check);
   const get = (id: string): StoredConfig => {
     const saved = data.accounts[id];
     const defaults = defaultTools();
@@ -211,9 +223,60 @@ export default ({ mainWindow }: { mainWindow: BrowserWindow }) => {
     data.accounts = Object.fromEntries(
       Object.entries(data.accounts).filter(([key]) => key !== id),
     );
+    if (data.accountProfiles)
+      data.accountProfiles = Object.fromEntries(
+        Object.entries(data.accountProfiles).filter(([key]) => key !== id),
+      );
     await apply(id, defaultTools());
     save();
   });
+  ipcMain.handle(
+    'account-tools-profile',
+    (event, id: string, input?: AccountSnapshot) => {
+      check(event, id);
+      const previous = Object.hasOwn(data.accountProfiles || {}, id)
+        ? data.accountProfiles![id]
+        : undefined;
+      if (input === undefined)
+        return previous ? structuredClone(previous) : undefined;
+      if (
+        !input ||
+        input.status !== 'online' ||
+        !validProfileOwner(input.ownerId) ||
+        (input.ownerIds !== undefined &&
+          (!Array.isArray(input.ownerIds) ||
+            input.ownerIds.length > 2 ||
+            !input.ownerIds.every(owner => validProfileOwner(owner)))) ||
+        (input.phone !== undefined &&
+          (typeof input.phone !== 'string' ||
+            !/^\d{6,16}$/.test(input.phone))) ||
+        (input.nickname !== undefined &&
+          (typeof input.nickname !== 'string' ||
+            input.nickname.length > 100)) ||
+        (input.avatar !== undefined &&
+          (typeof input.avatar !== 'string' ||
+            input.avatar.length > 700_000 ||
+            !/^data:image\/(png|jpeg|webp|gif|avif);base64,[\d+/=a-z]+$/i.test(
+              input.avatar,
+            )))
+      )
+        throw new Error('无效的已登录账号资料');
+      const profile = accountIdentity(
+        mergeAccountSnapshot({ status: 'loading', ...previous }, input),
+      )!;
+      if (JSON.stringify(previous) !== JSON.stringify(profile)) {
+        const old = data.accountProfiles;
+        data.accountProfiles = { ...old, [id]: profile };
+        try {
+          save();
+        } catch (error) {
+          data.accountProfiles = old;
+          throw error;
+        }
+      }
+      return structuredClone(profile);
+    },
+  );
   ipcMain.handle('account-tools-get', (event, id: string) => {
     check(event, id);
     return publicConfig(id);

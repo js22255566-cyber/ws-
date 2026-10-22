@@ -507,6 +507,7 @@ class EditSettingsScreen extends Component<
         settingsData.useCompactWorkspaceDrawer,
       ),
       hideAllServicesWorkspace: Boolean(settingsData.hideAllServicesWorkspace),
+      translationTextColor: settingsData.translationTextColor,
       accentColor: settingsData.accentColor,
       progressbarAccentColor: settingsData.progressbarAccentColor,
       showMessageBadgeWhenMuted: Boolean(
@@ -1340,6 +1341,14 @@ class EditSettingsScreen extends Component<
           ),
           default: DEFAULT_APP_SETTINGS.hideAllServicesWorkspace,
           type: 'checkbox',
+        },
+        translationTextColor: {
+          label: '翻译文字颜色',
+          value: ifUndefined<string>(
+            settings.all.app.translationTextColor,
+            DEFAULT_APP_SETTINGS.translationTextColor,
+          ),
+          default: DEFAULT_APP_SETTINGS.translationTextColor,
         },
         accentColor: {
           label: intl.formatMessage(messages.accentColor),

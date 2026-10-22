@@ -291,7 +291,7 @@ export function translationTick(
       state.withScroll(current.container, () => {
         current.status = 'done';
         current.label.textContent = text;
-        current.container.style.borderTop = '1px dashed #ffe45c';
+        current.container.style.borderTop = `1px dashed ${state.color || '#ffe45c'}`;
         current.button.disabled = false;
         current.button.hidden = true;
         current.button.style.display = 'none';
@@ -462,7 +462,10 @@ export function translationTick(
     });
   }
   const state = page.__zlTranslation;
-  if (JSON.stringify(state.config) !== JSON.stringify(config)) {
+  if (
+    JSON.stringify({ ...state.config, textColor: config.textColor }) !==
+    JSON.stringify(config)
+  ) {
     state.approved = null;
     state.failedReplacement = null;
     state.cancelPending();
@@ -481,6 +484,21 @@ export function translationTick(
     state.notice('');
   }
   state.config = config;
+  const textColor =
+    config.textColor && CSS.supports('color', config.textColor)
+      ? config.textColor
+      : '#ffe45c';
+  if (state.color !== textColor) {
+    state.color = textColor;
+    for (const label of document.querySelectorAll<HTMLElement>(
+      '[data-zl-translation-text]',
+    ))
+      label.style.color = textColor;
+    for (const container of document.querySelectorAll<HTMLElement>(
+      '[data-zl-translation]',
+    ))
+      container.style.borderTopColor = textColor;
+  }
   const scan =
     config.incoming &&
     Date.now() >= state.settleUntil &&
@@ -563,7 +581,8 @@ export function translationTick(
         const label = document.createElement('div');
         label.dataset.zlTranslationText = 'true';
         label.style.cssText =
-          'height:auto;color:#ffe45c;white-space:pre-wrap;overflow-wrap:anywhere';
+          'height:auto;white-space:pre-wrap;overflow-wrap:anywhere';
+        label.style.color = state.color;
         const button = document.createElement('button');
         button.type = 'button';
         button.dataset.zlTranslate = 'true';
@@ -807,7 +826,7 @@ export function translationResult(
   else {
     record.status = 'done';
     record.label.textContent = result.text;
-    record.container.style.borderTop = '1px dashed #ffe45c';
+    record.container.style.borderTop = `1px dashed ${state.color || '#ffe45c'}`;
     record.button.disabled = false;
     record.button.textContent = '点击翻译';
     record.button.hidden = true;

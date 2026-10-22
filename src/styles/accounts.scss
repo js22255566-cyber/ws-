@@ -266,11 +266,10 @@
     }
   }
   &__unread {
-    background: #1263e5;
-    color: #fff;
+    background: transparent;
+    color: #e53935;
     font-size: 11px;
     padding: 2px 5px;
-    border-radius: 10px;
   }
 }
 .account-status {
@@ -345,5 +344,77 @@
   .account-sidebar {
     flex-basis: 260px;
     width: 260px;
+  }
+}
+
+.account-sidebar__header {
+  display: flex;
+  flex: 0 0 40px;
+  gap: 4px;
+  .account-sidebar__new-group {
+    flex: 1;
+    min-width: 0;
+  }
+}
+.account-sidebar__collapse {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  flex: 0 0 28px;
+  border-radius: 6px;
+  &:hover {
+    background: #252a34;
+  }
+}
+.account-sidebar.is-collapsed {
+  width: 84px;
+  min-width: 84px;
+  flex-basis: 84px;
+  padding: 8px 5px;
+  .account-sidebar__header {
+    justify-content: center;
+    flex-basis: 28px;
+  }
+  .account-sidebar__new-group,
+  .account-group__header,
+  .account-group__empty,
+  .account-card__identity,
+  .account-card__more,
+  .account-card__sleep,
+  .account-card__remark svg,
+  .account-sidebar__footer > button:nth-child(2),
+  .account-sidebar__footer span {
+    display: none;
+  }
+  .account-group {
+    margin-top: 5px;
+  }
+  .account-group__cards {
+    gap: 7px;
+    padding: 0;
+  }
+  .account-card {
+    min-height: 78px;
+  }
+  .account-card__select {
+    min-height: 54px;
+    padding: 6px 0 0;
+    justify-content: center;
+  }
+  .account-card__remark {
+    justify-content: center;
+    width: calc(100% - 8px);
+    max-width: none;
+    margin: 4px 4px 7px;
+    font-size: 12px !important;
+  }
+  .account-card__unread {
+    position: absolute;
+    top: 2px;
+    right: 2px;
+  }
+  .account-sidebar__footer {
+    justify-content: center;
   }
 }

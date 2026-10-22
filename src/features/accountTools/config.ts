@@ -23,6 +23,7 @@ export interface ProviderCredential {
   model?: string;
 }
 export interface TranslationConfig {
+  textColor?: string;
   cacheRevision?: string;
   outgoing: boolean;
   incoming: boolean;

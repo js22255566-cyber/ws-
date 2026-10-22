@@ -1,7 +1,14 @@
 /* eslint-disable no-void -- UI event handlers start internally handled asynchronous operations. */
+import {
+  mdiAccountGroupOutline,
+  mdiAccountMultiplePlusOutline,
+  mdiAccountMultipleMinusOutline,
+} from '@mdi/js';
 import { ipcRenderer, clipboard } from 'electron';
 import { observer } from 'mobx-react';
 import { useEffect, useState, useId } from 'react';
+import type { GroupMode } from '../groups/types';
+import GroupTools from '../groups/GroupTools';
 import CustomerPanel, {
   CustomerRemarkDialog,
 } from '../customers/CustomerPanel';
@@ -94,7 +101,15 @@ function Switch({
   );
 }
 const SettingsPanel = observer(
-  ({ service, panel }: { service?: Service; panel: string }) => {
+  ({
+    service,
+    panel,
+    textColor,
+  }: {
+    service?: Service;
+    panel: string;
+    textColor?: string;
+  }) => {
     const [config, setConfig] = useState<ToolsConfig>(defaultTools);
     const [loaded, setLoaded] = useState(false);
     const [busy, setBusy] = useState(false);
@@ -149,7 +164,8 @@ const SettingsPanel = observer(
         const old = await getTools(service.id);
         const saved = await saveTools(service.id, input);
         setConfig(saved);
-        if (panel === 'translation') await configureTranslation(service);
+        if (panel === 'translation')
+          await configureTranslation(service, textColor);
         if (JSON.stringify(old.proxy) !== JSON.stringify(saved.proxy))
           service.webview?.reload();
         if (typeof test === 'string') {
@@ -606,6 +622,7 @@ const SettingsPanel = observer(
 const AccountTools = observer(({ stores }: StoresProps) => {
   const [panel, setPanel] = useState('');
   const [bulk, setBulk] = useState(false);
+  const [groupMode, setGroupMode] = useState<GroupMode>();
   useEffect(() => startTranslations(stores), [stores]);
   const customers = getCustomerRuntime(stores);
   useEffect(() => {
@@ -628,6 +645,7 @@ const AccountTools = observer(({ stores }: StoresProps) => {
           key={`${service?.id}-${panel}`}
           service={service}
           panel={panel}
+          textColor={stores.settings.app.translationTextColor}
         />
       )}
       <nav className="account-tools-rail">
@@ -668,7 +686,34 @@ const AccountTools = observer(({ stores }: StoresProps) => {
         <button type="button" onClick={() => setBulk(true)}>
           ☷<span>群发</span>
         </button>
+        {(
+          [
+            ['speech', '群组', mdiAccountGroupOutline],
+            ['join', '进群', mdiAccountMultiplePlusOutline],
+            ['leave', '退群', mdiAccountMultipleMinusOutline],
+          ] as const
+        ).map(([mode, label, icon]) => (
+          <button
+            type="button"
+            key={mode}
+            aria-label={label}
+            aria-pressed={groupMode === mode}
+            onClick={() => setGroupMode(mode)}
+          >
+            <svg width="26" height="26" viewBox="0 0 24 24" aria-hidden="true">
+              <path d={icon} />
+            </svg>
+            <span>{label}</span>
+          </button>
+        ))}
       </nav>
+      {groupMode && (
+        <GroupTools
+          stores={stores}
+          mode={groupMode}
+          onClose={() => setGroupMode(undefined)}
+        />
+      )}
       {bulk && <BulkSend stores={stores} onClose={() => setBulk(false)} />}
       <CustomerRemarkDialog runtime={customers} />
     </aside>

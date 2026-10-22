@@ -10,6 +10,7 @@ import {
   dialog,
   globalShortcut,
   ipcMain,
+  nativeTheme,
   session,
 } from 'electron';
 
@@ -42,7 +43,6 @@ import { ifUndefined } from './jsUtils';
 import Settings from './electron/Settings';
 import handleDeepLink, { getDeepLinkFromArgs } from './electron/deepLinking';
 import './electron/exception';
-// eslint-disable-next-line import/no-cycle
 import ipcApi from './electron/ipc-api';
 import isPositionValid from './electron/windowUtils';
 import { mainIpcHandler as basicAuthHandler } from './features/basicAuth';
@@ -58,6 +58,7 @@ import { openExternalUrl } from './helpers/url-helpers';
 import userAgent from './helpers/userAgent-helpers';
 import generatedTranslations from './i18n/translations';
 import { darkThemeGrayDarkest } from './themes/legacy';
+import { appThemeSource } from './features/appearance/theme';
 
 const debug = require('./preload-safe-debug')('Ferdium:App');
 
@@ -250,10 +251,18 @@ const createWindow = () => {
   }
 
   // Create the browser window.
-  const backgroundColor = retrieveSettingValue(
-    'darkMode',
-    DEFAULT_APP_SETTINGS.darkMode,
-  )
+  nativeTheme.themeSource = appThemeSource({
+    darkMode: Boolean(
+      retrieveSettingValue('darkMode', DEFAULT_APP_SETTINGS.darkMode),
+    ),
+    adaptableDarkMode: Boolean(
+      retrieveSettingValue(
+        'adaptableDarkMode',
+        DEFAULT_APP_SETTINGS.adaptableDarkMode,
+      ),
+    ),
+  });
+  const backgroundColor = nativeTheme.shouldUseDarkColors
     ? darkThemeGrayDarkest
     : (retrieveSettingValue(
         'accentColor',

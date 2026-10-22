@@ -22,8 +22,8 @@ class ColorPickerInput extends Component<IProps> {
 
   onChange(color: ColorResult, event: ChangeEvent<HTMLInputElement>): void {
     const { onColorChange, onChange = noop } = this.props;
-    onColorChange(event);
     onChange(color.hex);
+    onColorChange(event);
   }
 
   render() {

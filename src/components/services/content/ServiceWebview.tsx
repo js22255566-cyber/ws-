@@ -15,8 +15,10 @@ import ElectronWebView from 'react-electron-web-view';
 import type ServiceModel from '../../../models/Service';
 import type { RealStores } from '../../../stores';
 import {
+  applyWhatsAppTheme,
   readWhatsAppSnapshot,
   mergeAccountSnapshot,
+  accountIdentity,
 } from '../../../features/accounts/whatsapp';
 import { configureTranslation } from '../../../features/accountTools/runtime';
 
@@ -77,18 +79,33 @@ class ServiceWebview extends Component<IProps> {
 
   private lastAppliedZoom: number | null = null;
 
+  private lastStoredIdentity = '';
+
+  private disposed = false;
+
   pollAccount = async (): Promise<void> => {
     const { service, stores } = this.props;
     const view = this.webview?.view;
-    if (!view || service.recipe?.id !== 'whatsapp' || this.accountPollRunning)
+    if (
+      !view ||
+      service.recipe?.id !== 'whatsapp' ||
+      this.accountPollRunning ||
+      this.disposed
+    )
       return;
     this.accountPollRunning = true;
     try {
-      await configureTranslation(service);
+      await view.executeJavaScript(
+        `(${applyWhatsAppTheme.toString()})(${Boolean(stores?.ui.isDarkThemeActive || service.isDarkModeEnabled)})`,
+      );
+      await configureTranslation(
+        service,
+        stores?.settings.app.translationTextColor,
+      );
       const snapshot = await view.executeJavaScript(
         `(${readWhatsAppSnapshot.toString()})()`,
       );
-      if (this.webview?.view !== view) return;
+      if (this.webview?.view !== view || this.disposed) return;
       runInAction(() => {
         service.accountSnapshot = mergeAccountSnapshot(
           service.accountSnapshot,
@@ -102,6 +119,23 @@ class ServiceWebview extends Component<IProps> {
           service.unreadIndirectMessageCount = 0;
         }
       });
+      if (snapshot.status === 'online' && snapshot.ownerId) {
+        const profile = accountIdentity(service.accountSnapshot);
+        const identity = JSON.stringify(profile);
+        if (identity !== this.lastStoredIdentity) {
+          await ipcRenderer
+            .invoke('account-tools-profile', service.id, {
+              ...profile,
+              status: 'online',
+            })
+            .then(() => {
+              this.lastStoredIdentity = identity;
+            })
+            .catch(error => {
+              debug('Could not save last WhatsApp identity', error);
+            });
+        }
+      }
       const zoom =
         stores?.settings.app.accountSidebar?.accounts[service.id]?.zoom ?? 1;
       if (zoom !== this.lastAppliedZoom) {
@@ -149,6 +183,7 @@ class ServiceWebview extends Component<IProps> {
   }
 
   componentWillUnmount(): void {
+    this.disposed = true;
     const { service, detachService } = this.props;
     this.webviewReactionDisposer();
     this.removeWebviewEventListeners(this.webview?.view ?? null);

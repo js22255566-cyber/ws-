@@ -7,6 +7,7 @@ export interface AccountSnapshot {
   phone?: string;
   avatar?: string;
   ownerId?: string;
+  ownerIds?: string[];
   unreadMessages?: number;
 }
 
@@ -212,6 +213,7 @@ export async function readWhatsAppSnapshot(): Promise<AccountSnapshot> {
   return {
     status: 'online',
     ownerId: ownerId || undefined,
+    ownerIds: [...new Set(identities.map(identity => serialized(identity)))],
     nickname:
       typeof conn?.pushname === 'string'
         ? conn.pushname.slice(0, 100)
@@ -253,19 +255,52 @@ export async function readWhatsAppSnapshot(): Promise<AccountSnapshot> {
   };
 }
 
-// Host snapshots can briefly omit a picture while WhatsApp remounts its DOM.
-// Reuse it only when both snapshots prove the same logged-in owner.
+export type AccountIdentity = Pick<
+  AccountSnapshot,
+  'ownerId' | 'ownerIds' | 'nickname' | 'phone' | 'avatar'
+>;
+
+export function accountIdentity(
+  snapshot: AccountSnapshot,
+): AccountIdentity | undefined {
+  if (!snapshot.ownerId) return undefined;
+  return {
+    ownerId: snapshot.ownerId,
+    ownerIds: [
+      ...new Set([snapshot.ownerId, ...(snapshot.ownerIds || [])]),
+    ].slice(0, 2),
+    nickname: snapshot.nickname,
+    phone: snapshot.phone,
+    avatar: snapshot.avatar,
+  };
+}
+
+// A card retains the last confirmed identity through logout and network errors.
+// Session status/unreads always come from the new live observation. A proven
+// different owner starts a fresh identity, even if its photo is still loading.
 export function mergeAccountSnapshot(
   previous: AccountSnapshot,
   next: AccountSnapshot,
 ): AccountSnapshot {
-  return next.status === 'online' &&
-    next.ownerId &&
-    next.ownerId === previous.ownerId &&
-    !next.avatar &&
-    previous.avatar
-    ? { ...next, avatar: previous.avatar }
-    : next;
+  const known = accountIdentity(previous);
+  if (next.status !== 'online' || !next.ownerId)
+    return {
+      status: next.status,
+      ...known,
+      unreadMessages: next.unreadMessages,
+    };
+  const oldIds = [previous.ownerId, ...(previous.ownerIds || [])].filter(
+    Boolean,
+  );
+  const newIds = [next.ownerId, ...(next.ownerIds || [])];
+  if (!newIds.some(id => oldIds.includes(id))) return next;
+  return {
+    ...next,
+    ownerIds: [...new Set([...newIds, ...oldIds])].slice(0, 2) as string[],
+    nickname: next.nickname || previous.nickname,
+    phone: next.phone || previous.phone,
+    avatar: next.avatar || previous.avatar,
+  };
 }
 
 export async function markAllWhatsAppRead(): Promise<{
@@ -317,4 +352,54 @@ export function accountStatus(service: {
     return 'error';
   if (service.isLoading) return 'loading';
   return service.accountSnapshot.status;
+}
+
+// Serialized into the WhatsApp main world. Scope the override to this desktop
+// page; do not change phone/account preferences or reload an unsent draft.
+export function applyWhatsAppTheme(dark: boolean): boolean {
+  if (
+    globalThis.location.hostname !== 'web.whatsapp.com' ||
+    !document.documentElement
+  )
+    return false;
+  const page = window as any;
+  if (!page.__zlWhatsAppTheme) {
+    const state: any = { dark };
+    page.__zlWhatsAppTheme = state;
+    state.apply = () => {
+      const root = document.documentElement;
+      const { body } = document;
+      const desired = state.dark ? 'dark' : 'light';
+      const other = state.dark ? 'light' : 'dark';
+      for (const element of [root, body].filter(Boolean)) {
+        if (element.classList.contains(other)) element.classList.remove(other);
+        if (!element.classList.contains(desired))
+          element.classList.add(desired);
+        if (element.style.colorScheme !== desired)
+          element.style.colorScheme = desired;
+        for (const attribute of ['data-theme', 'data-app-theme']) {
+          if (
+            element.hasAttribute(attribute) &&
+            element.getAttribute(attribute) !== desired
+          )
+            element.setAttribute(attribute, desired);
+        }
+      }
+      if (state.body !== body) {
+        state.observer.disconnect();
+        const options = {
+          attributes: true,
+          attributeFilter: ['class', 'data-theme', 'data-app-theme', 'style'],
+        };
+        state.observer.observe(root, { ...options, childList: true });
+        if (body) state.observer.observe(body, options);
+        state.body = body;
+      }
+    };
+    state.observer = new MutationObserver(state.apply);
+  }
+  const state = page.__zlWhatsAppTheme;
+  state.dark = dark;
+  state.apply();
+  return true;
 }

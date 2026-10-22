@@ -13,6 +13,8 @@ import {
   mdiAccountEditOutline,
   mdiCheckAll,
   mdiChevronDown,
+  mdiChevronDoubleLeft,
+  mdiChevronDoubleRight,
   mdiChevronRight,
   mdiCogOutline,
   mdiDeleteOutline,
@@ -345,6 +347,13 @@ export default class AccountSidebar extends Component<StoresProps, State> {
         key={service.id}
         className={`account-card ${service.isActive ? 'is-active' : ''} ${this.state.dragging === service.id ? 'is-dragging' : ''} ${this.state.drop?.id === service.id ? (this.state.drop.after ? 'drop-after' : 'drop-before') : ''}`}
         data-service-id={service.id}
+        onContextMenu={event => {
+          if (!this.config.collapsed) return;
+          event.preventDefault();
+          this.setState({
+            menu: { id: service.id, anchor: event.currentTarget },
+          });
+        }}
         draggable={!this.state.busy}
         onDragStart={event => {
           if (
@@ -373,6 +382,7 @@ export default class AccountSidebar extends Component<StoresProps, State> {
           className="account-card__select"
           onClick={() => this.select(service)}
           aria-label={`打开 ${name}`}
+          title={`${name}${profile.phone ? ` · ${profile.phone}` : ''}`}
         >
           <span className="account-card__portrait">
             {profile.avatar ? (
@@ -392,7 +402,9 @@ export default class AccountSidebar extends Component<StoresProps, State> {
               {name}
             </span>
             <span className="account-card__phone">
-              {isWhatsApp ? profile.phone || '号码待同步' : service.recipe.name}
+              {isWhatsApp
+                ? profile.phone || (profile.ownerId ? '' : '尚未登录')
+                : service.recipe.name}
             </span>
           </span>
           {unread > 0 && (
@@ -405,9 +417,13 @@ export default class AccountSidebar extends Component<StoresProps, State> {
           type="button"
           className="account-card__remark"
           onClick={() =>
-            this.openDialog('remark', service.id, prefs.remark ?? '')
+            this.config.collapsed
+              ? this.select(service)
+              : this.openDialog('remark', service.id, prefs.remark ?? '')
           }
-          title="编辑备注"
+          title={
+            this.config.collapsed ? prefs.remark || '暂无备注' : '编辑备注'
+          }
         >
           <Icon icon={mdiPencilOutline} size={0.6} />
           <span>{prefs.remark || '暂无备注'}</span>
@@ -650,16 +666,41 @@ export default class AccountSidebar extends Component<StoresProps, State> {
     const { config } = this;
     const { services } = this.props.stores;
     return (
-      <aside className="account-sidebar" aria-label="账号分组">
-        <button
-          type="button"
-          className="account-sidebar__new-group"
-          disabled={this.state.busy}
-          onClick={() => this.openDialog('group')}
-        >
-          <Icon icon={mdiPlus} size={0.9} />
-          新增分组
-        </button>
+      <aside
+        className={`account-sidebar ${config.collapsed ? 'is-collapsed' : ''}`}
+        aria-label="账号分组"
+      >
+        <div className="account-sidebar__header">
+          <button
+            type="button"
+            className="account-sidebar__new-group"
+            disabled={this.state.busy}
+            onClick={() => this.openDialog('group')}
+          >
+            <Icon icon={mdiPlus} size={0.9} />
+            新增分组
+          </button>
+          <button
+            type="button"
+            className="account-sidebar__collapse"
+            aria-label={config.collapsed ? '展开账户栏' : '折叠账户栏'}
+            title={config.collapsed ? '展开账户栏' : '折叠账户栏'}
+            aria-expanded={!config.collapsed}
+            disabled={this.state.busy}
+            onClick={() =>
+              this.perform(() =>
+                this.save({ ...config, collapsed: !config.collapsed }),
+              )
+            }
+          >
+            <Icon
+              icon={
+                config.collapsed ? mdiChevronDoubleRight : mdiChevronDoubleLeft
+              }
+              size={0.85}
+            />
+          </button>
+        </div>
         {this.state.notice && !this.state.dialog && (
           <div className="account-sidebar__notice" role="status">
             {this.state.notice}
@@ -745,7 +786,7 @@ export default class AccountSidebar extends Component<StoresProps, State> {
                     <Icon icon={mdiDotsVertical} size={0.8} />
                   </button>
                 </header>
-                {!group.collapsed && (
+                {(config.collapsed || !group.collapsed) && (
                   <div className="account-group__cards">
                     {accounts.map(service => this.renderCard(service))}
                     {accounts.length === 0 && (
@@ -763,9 +804,11 @@ export default class AccountSidebar extends Component<StoresProps, State> {
           <button
             type="button"
             onClick={() => this.props.actions.ui.openSettings({ path: 'app' })}
+            aria-label="设置"
+            title="设置"
           >
             <Icon icon={mdiCogOutline} size={0.8} />
-            设置
+            <span>设置</span>
           </button>
           <button
             type="button"
@@ -774,14 +817,6 @@ export default class AccountSidebar extends Component<StoresProps, State> {
             }
           >
             原有服务
-          </button>
-          <button
-            type="button"
-            onClick={() =>
-              this.props.actions.ui.openDownloads({ path: 'downloads' })
-            }
-          >
-            下载
           </button>
         </footer>
         {this.renderMenu()}
