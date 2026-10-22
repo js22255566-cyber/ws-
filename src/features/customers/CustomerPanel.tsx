@@ -361,6 +361,9 @@ export default function CustomerPanel({
       runtime.listeners.delete(listener);
     };
   }, [runtime]);
+  useEffect(() => {
+    void runtime.refresh();
+  }, [runtime, activeId]);
   const context = runtime.current;
   const bundle = context ? runtime.bundle : undefined;
   const id = context?.chat?.id;
@@ -383,7 +386,9 @@ export default function CustomerPanel({
         </button>
       </div>
       {bundle ? (
-        context?.chat ? (
+        context?.chat?.group ? (
+          <p>群聊不显示客户资料，可在聊天列表中填写快速备注。</p>
+        ) : context?.chat ? (
           <CustomerEditor
             key={`${bundle.owner}:${canonical}:${context.token}`}
             runtime={runtime}
@@ -392,7 +397,7 @@ export default function CustomerPanel({
             contact={context.chat}
           />
         ) : (
-          <p>请先打开一个联系人或群聊，再查看客户资料。</p>
+          <p>请先打开一个私聊联系人，再查看客户资料。</p>
         )
       ) : (
         <p>{runtime.error || '请先选择已登录的 WhatsApp 账号。'}</p>

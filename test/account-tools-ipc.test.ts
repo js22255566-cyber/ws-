@@ -1,5 +1,5 @@
 /* eslint-disable global-require -- Load modules after installing fresh privileged Electron mocks. */
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { defaultTools } from '../src/features/accountTools/config';
@@ -197,7 +197,122 @@ describe('privileged account tools IPC', () => {
     event.senderFrame = mainWindow.webContents.mainFrame;
     expect(() => invoke('get', '../../bad')).toThrow('无效账号');
   });
-  it('prepares independent Sessions, resets direct on disable, and avoids disturbing another account', async () => {
+  it('isolates account network probes, shares pending requests, caches results and supports refresh', async () => {
+    await Promise.all(
+      ['account-1', 'account-2'].map(id => invoke('prepare', id)),
+    );
+    const first = sessions.get('persist:service-account-1');
+    const second = sessions.get('persist:service-account-2');
+    first.fetch.mockImplementation(
+      async (url: string) =>
+        new Response(url.includes('cdn-cgi') ? 'ip=203.0.113.1' : null),
+    );
+    second.fetch.mockImplementation(
+      async (url: string) =>
+        new Response(url.includes('cdn-cgi') ? 'ip=203.0.113.2' : null),
+    );
+    const [one, shared] = await Promise.all([
+      invoke('network-status', 'account-1'),
+      invoke('network-status', 'account-1'),
+    ]);
+    expect(one.ip).toBe('203.0.113.1');
+    expect(shared).toEqual(one);
+    expect(first.fetch).toHaveBeenCalledTimes(2);
+    const other = await invoke('network-status', 'account-2');
+    expect(other.ip).toBe('203.0.113.2');
+    const cached = await invoke('network-status', 'account-1');
+    expect(cached.ip).toBe('203.0.113.1');
+    expect(first.fetch).toHaveBeenCalledTimes(2);
+    await invoke('network-status', 'account-1', true);
+    expect(first.fetch).toHaveBeenCalledTimes(4);
+    event.senderFrame = {};
+    await expect(invoke('network-status', 'account-1')).rejects.toThrow('禁止');
+  });
+  it('does not expose a direct IP when a configured proxy route fails', async () => {
+    const config = defaultTools();
+    config.proxy = {
+      ...config.proxy,
+      enabled: true,
+      host: 'localhost',
+      port: '8888',
+    };
+    await invoke('save', 'account-1', config);
+    const s = sessions.get('persist:service-account-1');
+    await expect(invoke('network-status', 'account-1')).rejects.toThrow(
+      '未使用配置的代理',
+    );
+    expect(s.fetch).not.toHaveBeenCalled();
+    s.resolveProxy.mockResolvedValue('PROXY localhost:8888');
+    s.fetch.mockImplementation(
+      async (url: string) =>
+        new Response(url.includes('cdn-cgi') ? 'ip=203.0.113.3' : null),
+    );
+    const recovered = await invoke('network-status', 'account-1', true);
+    expect(recovered.ip).toBe('203.0.113.3');
+  });
+  it('discards a probe completed after the account network configuration changes', async () => {
+    await invoke('prepare', 'account-1');
+    const s = sessions.get('persist:service-account-1');
+    let finish!: (value: Response) => void;
+    let started!: () => void;
+    const waiting = new Promise<void>(resolve => {
+      started = resolve;
+    });
+    s.fetch.mockImplementation(async (url: string) => {
+      if (!url.includes('cdn-cgi')) return new Response(null);
+      started();
+      return new Promise<Response>(resolve => {
+        finish = resolve;
+      });
+    });
+    const request = invoke('network-status', 'account-1');
+    await waiting;
+    const config = defaultTools();
+    config.proxy.enabled = true;
+    config.proxy.mode = 'system';
+    await invoke('save', 'account-1', config);
+    finish(new Response('ip=203.0.113.4'));
+    await expect(request).rejects.toThrow('网络配置已更改');
+    s.fetch.mockImplementation(
+      async (url: string) =>
+        new Response(url.includes('cdn-cgi') ? 'ip=203.0.113.5' : null),
+    );
+    const current = await invoke('network-status', 'account-1');
+    expect(current.ip).toBe('203.0.113.5');
+  });
+  it('migrates the removed direct option to disabled without losing manual settings', async () => {
+    const config = defaultTools();
+    writeFileSync(
+      join(root, 'account-tools.json'),
+      JSON.stringify({
+        accounts: {
+          'account-1': {
+            ...config,
+            proxy: {
+              ...config.proxy,
+              enabled: true,
+              mode: 'direct',
+              host: 'localhost',
+              port: '8888',
+            },
+          },
+        },
+        history: [],
+      }),
+    );
+    require('../src/electron/ipc-api/accountTools').default({ mainWindow });
+    const restored = await invoke('prepare', 'account-1');
+    expect(restored.proxy).toMatchObject({
+      enabled: false,
+      mode: 'manual',
+      host: 'localhost',
+      port: '8888',
+    });
+    expect(
+      sessions.get('persist:service-account-1').setProxy,
+    ).toHaveBeenLastCalledWith({ mode: 'system' });
+  });
+  it('prepares independent Sessions, restores the system network on disable, and avoids disturbing another account', async () => {
     await invoke('prepare', 'account-1');
     await invoke('prepare', 'account-2');
     const config = defaultTools();
@@ -217,7 +332,7 @@ describe('privileged account tools IPC', () => {
     ).toHaveBeenCalledTimes(1);
     config.proxy.enabled = false;
     await invoke('save', 'account-1', config);
-    expect(first.setProxy).toHaveBeenLastCalledWith({ mode: 'direct' });
+    expect(first.setProxy).toHaveBeenLastCalledWith({ mode: 'system' });
   });
   it('allocates distinct authenticated SOCKS bridges per account and releases only the disabled account', async () => {
     const c = defaultTools();
@@ -240,7 +355,7 @@ describe('privileged account tools IPC', () => {
     expect(a.proxyRules).not.toBe(b.proxyRules);
     c.proxy.enabled = false;
     await invoke('save', 'account-1', c);
-    expect(first.setProxy).toHaveBeenLastCalledWith({ mode: 'direct' });
+    expect(first.setProxy).toHaveBeenLastCalledWith({ mode: 'system' });
     expect(second.setProxy).toHaveBeenCalledTimes(1);
     const saved = await invoke('get', 'account-2');
     expect(saved.proxy.password).toBeUndefined();

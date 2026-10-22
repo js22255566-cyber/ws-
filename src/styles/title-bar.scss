@@ -101,3 +101,81 @@
     }
   }
 }
+
+// Keep the network indicator beside, rather than over, the window controls.
+.app-titlebar {
+  position: relative;
+  flex-shrink: 0;
+}
+.account-network-status {
+  position: absolute;
+  top: 0;
+  right: 143px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: #b5bec6;
+  font: 12px/1 sans-serif;
+  white-space: nowrap;
+  -webkit-app-region: no-drag;
+  &__ip {
+    max-width: 260px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  &__latency {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+  }
+  &__dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #87939d;
+  }
+  &__latency--good &__dot {
+    background: #4acb80;
+  }
+  &__latency--slow &__dot {
+    background: #edbd4d;
+  }
+  &__latency--poor &__dot {
+    background: #f27070;
+  }
+  button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    -webkit-app-region: no-drag;
+  }
+  button:hover {
+    background: #ffffff18;
+  }
+  button:disabled {
+    opacity: 0.45;
+    cursor: default;
+  }
+}
+@media (max-width: 950px) {
+  .account-network-status {
+    gap: 7px;
+  }
+  .account-network-status__ip {
+    max-width: 145px;
+  }
+}
+@media (max-width: 780px) {
+  .account-network-status__ip {
+    display: none;
+  }
+}

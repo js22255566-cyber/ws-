@@ -11,6 +11,7 @@ interface Account {
   profiles: Record<string, CustomerProfile>;
   aliases: Record<string, string>;
   pins: string[];
+  pinsInitialized?: boolean;
 }
 export function customerId(id: unknown, owner = false): string {
   if (
@@ -95,6 +96,7 @@ export default class CustomerStore {
             target.profiles = { ...old.profiles, ...target.profiles };
             target.aliases = { ...old.aliases, ...target.aliases };
             target.pins = [...new Set([...target.pins, ...old.pins])];
+            target.pinsInitialized ||= old.pinsInitialized;
             Reflect.deleteProperty(this.data.accounts, key);
             for (const [alias, canonical] of Object.entries(this.data.owners))
               if (canonical === key) this.data.owners[alias] = owner;
@@ -113,6 +115,7 @@ export default class CustomerStore {
       owner: this.data.owners[owner] || owner,
       revision: account.revision,
       pins: [...account.pins],
+      pinsInitialized: Boolean(account.pinsInitialized),
       aliases: { ...account.aliases },
       summaries: Object.fromEntries(
         Object.entries(account.profiles).map(([id, p]) => [
@@ -182,6 +185,25 @@ export default class CustomerStore {
     )
       throw new Error('无效客户资料字段');
     return this.update(owner, id, { ...this.profile(owner, id), ...input });
+  }
+
+  importPins(owner: string, ids: string[]): CustomerBundle {
+    if (!Array.isArray(ids) || ids.length > 10_000)
+      throw new Error('无效置顶列表');
+    ids.forEach(id => customerId(id));
+    const account = this.account(owner);
+    if (account.pinsInitialized) return this.bundle(owner);
+    return this.mutate(() => {
+      account.pins = [
+        ...new Set([
+          ...account.pins,
+          ...ids.map(id => account.aliases[id] || id),
+        ]),
+      ];
+      account.pinsInitialized = true;
+      account.revision += 1;
+      return this.bundle(owner);
+    });
   }
 
   pin(

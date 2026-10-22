@@ -30,9 +30,63 @@ export function readCustomerContext(): CustomerContext {
       ].filter(id => /^\d{5,30}@(c\.us|lid)$/.test(id)),
     ),
   ].slice(0, 2);
-  const chat =
-    (page.WPP?.isReady ? page.WPP.chat?.getActiveChat?.() : undefined) ||
-    module('WAWebChatGetters')?.getActiveChat?.();
+  const header = document.querySelector('#main header');
+  if (!header) return { token: page.__zlCustomerToken, owners };
+  const collection = module('WAWebCollections')?.Chat;
+  const models: any[] =
+    collection?.getModelsArray?.() ?? collection?.models ?? [];
+  let chat: any;
+  try {
+    chat = page.WPP?.isReady ? page.WPP.chat?.getActiveChat?.() : undefined;
+  } catch {
+    /* The native collection remains available while the helper reloads. */
+  }
+  if (!chat?.id) {
+    try {
+      chat = module('WAWebChatGetters')?.getActiveChat?.();
+    } catch {
+      /* Try stable native identity sources below. */
+    }
+  }
+  if (!chat?.id) {
+    const active = models.filter(m => m.active === true);
+    if (active.length === 1) [chat] = active;
+  }
+  if (!chat?.id) {
+    // Message keys identify the actual conversation, even when the active-chat
+    // getter has moved in a WhatsApp update. Never infer identity from a name
+    // unless that name matches exactly one native model.
+    const marker =
+      document
+        .querySelector('#main [data-id^="true_"], #main [data-id^="false_"]')
+        ?.getAttribute('data-id') ||
+      document.querySelector('#main [data-id]')?.getAttribute('data-id') ||
+      '';
+    const remote =
+      /^(?:true|false)_([^_]+)_/.exec(marker)?.[1] ||
+      header.querySelector('[data-jid]')?.getAttribute('data-jid') ||
+      header.querySelector('[data-id]')?.getAttribute('data-id');
+    if (remote)
+      chat =
+        models.find(m => wid(m.id) === remote) ||
+        (/^\d{1,40}(?:-\d{1,30})?@(c\.us|lid|g\.us)$/.test(remote)
+          ? { id: remote }
+          : undefined);
+  }
+  if (!chat?.id) {
+    const name = header.querySelector('[title]')?.getAttribute('title');
+    const matches = name
+      ? models.filter(m =>
+          [
+            m.formattedTitle,
+            m.name,
+            m.contact?.name,
+            m.contact?.pushname,
+          ].includes(name),
+        )
+      : [];
+    if (matches.length === 1) [chat] = matches;
+  }
   const id = wid(chat?.id);
   if (
     !document.querySelector('#main header') ||
@@ -71,7 +125,10 @@ export function readCustomerContext(): CustomerContext {
 
 // Only short remarks, labels and pin order enter the page. The full customer
 // profile and long notes stay in the host application.
-export function customerTick(input?: CustomerBundle): CustomerAction[] {
+export function customerTick(
+  input?: CustomerBundle,
+  activeChatId?: string,
+): CustomerAction[] {
   if (globalThis.location.hostname !== 'web.whatsapp.com') return [];
   const page = window as any;
   if (!page.__zlCustomers) {
@@ -83,27 +140,98 @@ export function customerTick(input?: CustomerBundle): CustomerAction[] {
       layouts: new WeakMap(),
     };
     page.__zlCustomers = state;
-    state.action = (chatId: string, action: string, value?: string) => {
+    state.inlineDrafts = new Map();
+    state.commits = new WeakMap();
+    state.action = (
+      chatId: string,
+      action: string,
+      value?: string,
+      owner = state.data?.owner,
+    ) => {
       state.sequence += 1;
-      state.queue.push({ id: state.sequence, chatId, action, value });
+      state.queue.push({ id: state.sequence, chatId, action, value, owner });
     };
     const style = document.createElement('style');
     style.dataset.zlCustomers = 'style';
     style.textContent = `
-      .zl-chat-note{position:absolute;left:0;right:0;line-height:12px;font:11px/12px sans-serif;color:#ff6060;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;z-index:2;height:auto!important}
-      .zl-chat-actions{position:absolute;right:0;top:0;display:flex;gap:4px;align-items:center;height:auto!important;z-index:4;opacity:0}
-      [role="row"]:hover .zl-chat-actions,[role="row"]:focus-within .zl-chat-actions,.zl-chat-actions:focus-within{opacity:1}
-      .zl-chat-action{border:0;border-radius:4px;padding:2px 4px;background:#173242;color:#91cfff;font:11px sans-serif;cursor:pointer}
+      .zl-chat-note{position:absolute;left:0;right:0;width:100%;box-sizing:border-box;line-height:12px;font:11px/12px sans-serif;color:#ff6060;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;z-index:2;height:14px!important;min-height:0!important;padding:0!important;margin:0!important;border:0!important;background:transparent!important;outline:none;cursor:text;-webkit-app-region:no-drag}
+      .zl-chat-note::placeholder{color:#8a969c}
+      .zl-chat-note:focus{box-shadow:0 1px #579dff}
+      .zl-chat-note[data-save-state="error"]{box-shadow:0 1px #ff6060}
       .zl-customer-flags{display:inline-flex;gap:3px;vertical-align:middle;height:auto!important;margin-left:5px}
       .zl-customer-flag{display:inline-flex;align-items:center;justify-content:center;width:17px;height:17px!important;border-radius:50%;font:12px sans-serif;color:white}
-      .zl-local-pins{box-sizing:border-box;flex:0 0 auto;max-height:38vh;overflow:auto;background:var(--panel-background,#182229);border-bottom:1px solid #39434a;color:#d9e1e6;font:13px sans-serif}
-      .zl-local-pins>summary{padding:8px 12px;cursor:pointer;color:#8fbfff;font-size:12px;position:sticky;top:0;background:var(--panel-background,#182229);z-index:1}
-      .zl-local-pin{display:flex;gap:6px;align-items:center;border-top:1px solid #2d383e;padding:7px 10px;height:auto!important}
-      .zl-local-pin-open{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0;text-align:left;background:transparent;color:inherit;border:0;cursor:pointer;font:inherit;padding:3px}
-      .zl-local-pin-open small{display:block;color:#ff6060;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;margin-top:3px}
       .zl-header-note{color:#ff6060;font:12px sans-serif;margin-left:8px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
     `;
     document.head.append(style);
+    state.nativePins = new Map();
+    const rememberRow = (event: Event) => {
+      const target = event.target as Element;
+      const row = target.closest?.(
+        '#pane-side [role="row"], #pane-side [data-testid="cell-frame-container"]',
+      );
+      if (row) state.menuChat = state.resolveRow?.(row) || '';
+      else if (
+        !target.closest?.(
+          '[role="menu"], [role="menuitem"], [data-animate-dropdown], [data-animate-dropdown-item], [data-testid="mi-pin"], [data-testid="mi-unpin"]',
+        )
+      )
+        state.menuChat = '';
+    };
+    document.addEventListener('pointerdown', rememberRow, true);
+    document.addEventListener('contextmenu', rememberRow, true);
+    document.addEventListener(
+      'focusin',
+      event => {
+        if ((event.target as Element).closest?.('#pane-side [role="row"]'))
+          rememberRow(event);
+      },
+      true,
+    );
+    document.addEventListener(
+      'click',
+      event => {
+        const target = event.target as Element;
+        const item = target.closest?.(
+          '[role="menuitem"], [data-testid="mi-pin"], [data-testid="mi-unpin"], [data-animate-dropdown-item], [role="button"]',
+        );
+        if (!item || !state.menuChat || !state.data) return;
+        const text = item.textContent?.trim() || '';
+        const icon =
+          item.querySelector('[data-icon]')?.getAttribute('data-icon') || '';
+        const unpin =
+          /^(unpin chat|取消置顶(?:聊天)?)$/i.test(text) ||
+          /^(unpin|pinned-off|pin-off)$/.test(icon);
+        const pin =
+          /^(pin chat|置顶(?:聊天)?)$/i.test(text) ||
+          /^(pin|pinned)$/.test(icon);
+        if (!pin && !unpin) return;
+        const id = state.menuChat;
+        if (!state.models?.some((m: any) => state.idOf(m) === id)) return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        const key = state.data.aliases[id] || id;
+        const remove = state.data.pins.includes(key) || unpin;
+        state.action(id, remove ? 'unpin' : 'pin');
+        // Optimistic local order also prevents a second fast click reversing a
+        // stale menu state before the host has persisted the action.
+        state.data = {
+          ...state.data,
+          pins: remove
+            ? state.data.pins.filter((p: string) => p !== key)
+            : [key, ...state.data.pins.filter((p: string) => p !== key)],
+        };
+        state.dirty = true;
+        item.dispatchEvent(
+          new KeyboardEvent('keydown', {
+            key: 'Escape',
+            code: 'Escape',
+            bubbles: true,
+          }),
+        );
+        state.menuChat = '';
+      },
+      true,
+    );
     state.observer = new MutationObserver(changes => {
       if (
         changes.some(
@@ -133,9 +261,33 @@ export function customerTick(input?: CustomerBundle): CustomerAction[] {
         .querySelectorAll('[data-zl-customers]:not(style)')
         .forEach(n => n.remove());
       state.editor = undefined;
-      state.pinSignature = '';
+      for (const [model, pin] of state.nativePins) {
+        if (typeof model.set === 'function') model.set('pin', pin);
+        else model.pin = pin;
+      }
+      state.nativePins = new Map();
+      state.inlineDrafts.clear();
     }
     state.data = input;
+    for (const [key, draft] of state.inlineDrafts) {
+      const prefix = `${input.owner}:`;
+      if (key.startsWith(prefix)) {
+        const id = key.slice(prefix.length);
+        const canonicalKey = `${prefix}${input.aliases[id] || id}`;
+        if (canonicalKey !== key) {
+          if (!state.inlineDrafts.has(canonicalKey))
+            state.inlineDrafts.set(canonicalKey, draft);
+          state.inlineDrafts.delete(key);
+        }
+      }
+      if (
+        key.startsWith(prefix) &&
+        !draft.error &&
+        (input.summaries[key.slice(prefix.length)]?.remarkName || '') ===
+          draft.value
+      )
+        state.inlineDrafts.delete(key);
+    }
     state.dirty = true;
   }
   const { data } = state;
@@ -163,19 +315,6 @@ export function customerTick(input?: CustomerBundle): CustomerAction[] {
     }
     return box;
   };
-  const button = (label: string, id: string, action: string) => {
-    const b = document.createElement('button');
-    b.type = 'button';
-    b.className = 'zl-chat-action';
-    b.textContent = label;
-    b.title = label;
-    b.addEventListener('click', event => {
-      event.preventDefault();
-      event.stopPropagation();
-      state.action(id, action);
-    });
-    return b;
-  };
   // Native row identifiers are preferred. Title matching is used only for a
   // unique exact name, never for two contacts sharing the same display name.
   let models: any[] = [];
@@ -200,62 +339,50 @@ export function customerTick(input?: CustomerBundle): CustomerAction[] {
     const name = nameOf(model);
     names.set(name, [...(names.get(name) || []), idOf(model)]);
   }
+  state.models = models;
+  state.idOf = idOf;
+  state.resolveRow = (row: HTMLElement) => {
+    const possible =
+      row.dataset.id ||
+      row.dataset.jid ||
+      row.querySelector('[data-id]')?.getAttribute('data-id') ||
+      '';
+    if (models.some(m => idOf(m) === possible)) return possible;
+    const marker = row.querySelector<HTMLElement>(
+      '[title]:not([data-zl-customers]), [data-testid="cell-frame-title"] span',
+    );
+    const name = marker?.getAttribute('title') || marker?.textContent || '';
+    return names.get(name)?.length === 1 ? names.get(name)![0] : '';
+  };
+  // Project local pins onto the native model, so WhatsApp's own collection,
+  // virtual list, pin glyph and menu all render the normal pinned-chat state.
+  // Do not call setPin / server chat actions: their three-chat limit and phone
+  // synchronization must not control this desktop-only order.
+  if (!data.pinsInitialized && models.length > 0) {
+    const native = models
+      .filter(m => m.pin)
+      .sort((a, b) => Number(b.pin) - Number(a.pin));
+    const ids = native.map(m => idOf(m));
+    data.pins = [...new Set([...data.pins, ...ids.map(id => canonical(id))])];
+    data.pinsInitialized = true;
+    state.action('', 'importPins', JSON.stringify(ids));
+  }
+  for (const model of models) {
+    const index = data.pins.indexOf(canonical(idOf(model)));
+    if (!state.nativePins.has(model))
+      state.nativePins.set(model, model.pin || 0);
+    // A fixed base keeps incoming-message timestamps from moving local pins.
+    const projected = index < 0 ? 0 : 2_000_000_000 - index;
+    if (Number(model.pin || 0) !== projected) {
+      if (typeof model.set === 'function') model.set('pin', projected);
+      else model.pin = projected;
+    }
+  }
   if (state.dirty || Date.now() - (state.lastRender || 0) > 2000) {
     state.dirty = false;
     state.lastRender = Date.now();
     const pane = document.querySelector<HTMLElement>('#pane-side');
     if (pane) {
-      const signature = JSON.stringify([
-        data.revision,
-        data.pins,
-        models
-          .filter(m => data.pins.includes(canonical(idOf(m))))
-          .map(m => [idOf(m), nameOf(m)]),
-      ]);
-      let local = document.querySelector<HTMLDetailsElement>('.zl-local-pins');
-      if (
-        data.pins.length > 0 &&
-        (!local || signature !== state.pinSignature)
-      ) {
-        const scroll = local?.scrollTop || 0;
-        const expanded = local?.open ?? true;
-        if (!local) {
-          local = document.createElement('details');
-          local.className = 'zl-local-pins';
-          local.dataset.zlCustomers = 'pins';
-          pane.before(local);
-        }
-        const heading = document.createElement('summary');
-        heading.textContent = `本地置顶 (${data.pins.length})`;
-        local.replaceChildren(heading);
-        local.open = expanded;
-        for (const id of data.pins) {
-          const model = models.find(m => canonical(idOf(m)) === id);
-          const row = document.createElement('div');
-          row.className = 'zl-local-pin';
-          row.dataset.chatId = id;
-          const open = button('', model ? idOf(model) : id, 'open');
-          open.className = 'zl-local-pin-open';
-          const label = document.createElement('span');
-          label.textContent = model ? nameOf(model) : id.split('@')[0];
-          open.append(label, flags(id));
-          const note = document.createElement('small');
-          note.textContent = summary(id)?.remarkName || '';
-          open.append(note);
-          row.append(
-            open,
-            button('↑', id, 'up'),
-            button('↓', id, 'down'),
-            button('取消置顶', id, 'unpin'),
-          );
-          local.append(row);
-        }
-        local.scrollTop = scroll;
-        state.pinSignature = signature;
-      } else if (data.pins.length === 0) {
-        local?.remove();
-        state.pinSignature = '';
-      }
       const rows = [
         ...pane.querySelectorAll<HTMLElement>(
           '[role="row"], [data-testid="cell-frame-container"]',
@@ -284,9 +411,18 @@ export function customerTick(input?: CustomerBundle): CustomerAction[] {
             ? names.get(name)![0]
             : '';
         const key = `${match}:${data.revision}`;
+        const existingNote =
+          row.querySelector<HTMLInputElement>('.zl-chat-note');
+        if (
+          existingNote &&
+          document.activeElement === existingNote &&
+          row.dataset.zlCustomerKey?.startsWith(`${match}:`)
+        )
+          continue;
         if (
           row.dataset.zlCustomerKey === key &&
-          row.querySelector('.zl-chat-actions')
+          row.dataset.zlCustomerRendered === 'true' &&
+          existingNote
         )
           continue;
         for (const element of [row, ...row.querySelectorAll('*')]) {
@@ -297,7 +433,10 @@ export function customerTick(input?: CustomerBundle): CustomerAction[] {
             state.layouts.delete(element);
           }
         }
-        row.querySelectorAll('[data-zl-customers]').forEach(n => n.remove());
+        row.querySelectorAll('[data-zl-customers]').forEach(n => {
+          state.commits.get(n)?.();
+          n.remove();
+        });
         row.dataset.zlCustomerKey = key;
         if (!match) continue;
         let titleLine =
@@ -326,31 +465,99 @@ export function customerTick(input?: CustomerBundle): CustomerAction[] {
             break;
           }
         }
-        const actions = document.createElement('span');
-        actions.className = 'zl-chat-actions';
-        actions.dataset.zlCustomers = 'actions';
-        actions.append(
-          button(
-            data.pins.includes(canonical(match)) ? '取消置顶' : '置顶',
-            match,
-            data.pins.includes(canonical(match)) ? 'unpin' : 'pin',
-          ),
-        );
-        const edit = button('备注', match, 'remark');
-        actions.append(edit);
         state.layouts.set(titleLine, {
           position: titleLine.style.position,
           top: titleLine.style.top,
         });
         titleLine.style.position = 'relative';
-        titleLine.append(flags(match), actions);
+        titleLine.append(flags(match));
+        row.dataset.zlCustomerRendered = 'true';
         const note = summary(match)?.remarkName;
-        if (note) {
-          const line = document.createElement('div');
+        {
+          const line = document.createElement('input');
           line.className = 'zl-chat-note';
           line.dataset.zlCustomers = 'note';
-          line.textContent = note;
-          line.title = note;
+          const owner = data.owner;
+          const draftKey = () =>
+            `${owner}:${state.data.aliases[match] || match}`;
+          const savedNote = note || '';
+          const draft = state.inlineDrafts.get(draftKey());
+          line.type = 'text';
+          line.maxLength = 100;
+          line.placeholder = '添加备注';
+          line.setAttribute('aria-label', '聊天备注名');
+          line.dataset.chatId = match;
+          line.value = draft?.value ?? savedNote;
+          line.title =
+            draft?.error ||
+            line.value ||
+            '点击填写备注，Enter 保存，Esc 取消未保存的修改';
+          line.dataset.saveState = draft?.error
+            ? 'error'
+            : draft
+              ? 'pending'
+              : 'saved';
+          let committed = savedNote;
+          let timer: ReturnType<typeof setTimeout> | undefined;
+          let composing = false;
+          const commit = () => {
+            clearTimeout(timer);
+            if (composing || state.data?.owner !== owner) return;
+            const value = line.value;
+            const current = state.inlineDrafts.get(draftKey());
+            if (value === committed && !current?.error) return;
+            committed = value;
+            state.inlineDrafts.set(draftKey(), { value });
+            line.dataset.saveState = 'pending';
+            state.action(match, 'saveRemark', value, owner);
+          };
+          state.commits.set(line, commit);
+          line.addEventListener('input', () => {
+            state.inlineDrafts.set(draftKey(), { value: line.value });
+            clearTimeout(timer);
+            if (!composing) timer = setTimeout(commit, 350);
+          });
+          line.addEventListener('compositionstart', () => {
+            composing = true;
+            clearTimeout(timer);
+          });
+          line.addEventListener('compositionend', () => {
+            composing = false;
+            clearTimeout(timer);
+            timer = setTimeout(commit, 350);
+          });
+          line.addEventListener('pointerdown', event =>
+            event.stopPropagation(),
+          );
+          line.addEventListener('click', event => event.stopPropagation());
+          line.addEventListener('keydown', event => {
+            event.stopPropagation();
+            if (event.isComposing) return;
+            if (event.key === 'Enter') {
+              event.preventDefault();
+              commit();
+              line.blur();
+            }
+            if (event.key === 'Escape') {
+              event.preventDefault();
+              clearTimeout(timer);
+              line.value = committed;
+              const currentSaved =
+                state.data.summaries[state.data.aliases[match] || match]
+                  ?.remarkName || '';
+              if (
+                committed === currentSaved ||
+                line.dataset.saveState === 'saved'
+              )
+                state.inlineDrafts.delete(draftKey());
+              else state.inlineDrafts.set(draftKey(), { value: committed });
+              line.blur();
+            }
+          });
+          line.addEventListener('blur', () => {
+            commit();
+            state.dirty = true;
+          });
           const titleBounds = titleLine.getBoundingClientRect();
           // Keep WhatsApp's virtual row height unchanged while making room for
           // the third text line between the native title and message preview.
@@ -375,9 +582,9 @@ export function customerTick(input?: CustomerBundle): CustomerAction[] {
         }
       }
     }
-    let active = '';
+    let active = activeChatId || '';
     try {
-      active = idOf(
+      active ||= idOf(
         (page.WPP?.isReady ? page.WPP.chat?.getActiveChat?.() : undefined) ||
           page.require?.('WAWebChatGetters')?.getActiveChat?.(),
       );
@@ -406,4 +613,31 @@ export function customerTick(input?: CustomerBundle): CustomerAction[] {
     }
   }
   return state.queue.splice(0);
+}
+
+// Acknowledge only the same account/chat/value: an older save must not replace
+// a newer inline draft, including after a row is recycled by the virtual list.
+export function customerRemarkResult(
+  owner: string,
+  chatId: string,
+  value: string,
+  error?: string,
+) {
+  const state = (window as any).__zlCustomers;
+  if (!state?.data || state.data.owner !== owner) return;
+  const canonical = state.data.aliases[chatId] || chatId;
+  const key = `${owner}:${canonical}`;
+  if (state.inlineDrafts.get(key)?.value !== value) return;
+  if (error) state.inlineDrafts.set(key, { value, error });
+  else state.inlineDrafts.delete(key);
+  for (const input of document.querySelectorAll<HTMLInputElement>(
+    '.zl-chat-note',
+  )) {
+    const id = input.dataset.chatId || '';
+    if ((state.data.aliases[id] || id) !== canonical || input.value !== value)
+      continue;
+    input.dataset.saveState = error ? 'error' : 'saved';
+    input.title = error ? `保存失败：${error}，点击后可重试` : '已保存到本机';
+  }
+  state.dirty = true;
 }

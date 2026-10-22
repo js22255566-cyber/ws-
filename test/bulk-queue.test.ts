@@ -99,7 +99,7 @@ describe('persistent bulk queue without live WhatsApp', () => {
     await finish(queue.submit(spec({ failure: 'continue' })));
     expect(adapter.send).toHaveBeenCalledTimes(1);
     expect(queue.records[0]).toMatchObject({
-      status: '已停止',
+      status: '待确认',
       deliveries: [{ status: 'uncertain' }],
     });
   });
@@ -184,7 +184,7 @@ describe('persistent bulk queue without live WhatsApp', () => {
     await finish(queue.submit(spec({ failure: 'continue' })));
     expect(adapter.send).toHaveBeenCalledTimes(1);
     expect(queue.records[0]).toMatchObject({
-      status: '已停止',
+      status: '待确认',
       failed: 1,
       deliveries: [{ messageId: 'known-but-unconfirmed', status: 'uncertain' }],
     });
@@ -212,6 +212,98 @@ describe('persistent bulk queue without live WhatsApp', () => {
     expect(adapter.send).toHaveBeenCalledWith(
       value.targets[0],
       expect.objectContaining({ text: '', type: 'image' }),
+    );
+  });
+  it('repairs false failures, restores IDs for revoke, and never resends during reconciliation', async () => {
+    const { targets } = spec();
+    queue.records = [
+      saved({
+        status: '部分失败',
+        failed: 2,
+        deliveries: targets.map(target => ({ target, status: 'failed' })),
+      }),
+    ];
+    adapter.reconcile = jest.fn(async target => ({
+      messageId: `restored-${target.id}`,
+      confirmed: true,
+    }));
+    await finish(queue.reconcile('saved'));
+    expect(queue.records[0]).toMatchObject({
+      status: '已完成',
+      success: 2,
+      failed: 0,
+    });
+    expect(
+      queue.records[0].deliveries?.every(d =>
+        Boolean(d.messageId && d.checkedAt),
+      ),
+    ).toBe(true);
+    expect(adapter.send).not.toHaveBeenCalled();
+    await finish(queue.revoke('saved'));
+    expect(adapter.revoke).toHaveBeenCalledWith(
+      targets[0],
+      `restored-${targets[0].id}`,
+    );
+  });
+  it('retains unverified results when reconciliation cannot uniquely identify a message', async () => {
+    const target = spec().targets[0];
+    queue.records = [
+      saved({
+        status: '待确认',
+        failed: 1,
+        deliveries: [{ target, status: 'uncertain' }],
+      }),
+    ];
+    adapter.reconcile = jest.fn().mockRejectedValue(new Error('ambiguous'));
+    await finish(queue.reconcile('saved'));
+    expect(queue.records[0]).toMatchObject({
+      success: 0,
+      deliveries: [
+        {
+          status: 'uncertain',
+          checkError: expect.stringContaining('ambiguous'),
+        },
+      ],
+    });
+    expect(adapter.send).not.toHaveBeenCalled();
+  });
+  it('edits selected real message IDs without sending again, retaining per-target failures', async () => {
+    await finish(queue.submit(spec()));
+    adapter.edit = jest.fn(async target => {
+      if (target.accountId === 'account-2') throw new Error('expired');
+    });
+    await finish(
+      queue.edit(
+        queue.records[0].id,
+        'corrected',
+        spec().targets.map(t => `${t.accountId}:${t.id}`),
+      ),
+    );
+    expect(queue.records[0].deliveries).toMatchObject([
+      { editedText: 'corrected', editedAt: expect.any(String) },
+      { editError: expect.stringContaining('expired') },
+    ]);
+    expect(queue.records[0].text).toBe('hello');
+    expect(queue.records[0].editedText).toBeUndefined();
+    expect(adapter.send).toHaveBeenCalledTimes(2);
+    expect(adapter.revoke).not.toHaveBeenCalled();
+  });
+  it('persists a successful correction and lets revoke still use the original message ID', async () => {
+    await finish(queue.submit(spec()));
+    adapter.edit = jest.fn().mockImplementation(async () => {});
+    const { id } = queue.records[0];
+    await finish(
+      queue.edit(
+        id,
+        'corrected',
+        spec().targets.map(t => `${t.accountId}:${t.id}`),
+      ),
+    );
+    expect(queue.records[0].editedText).toBe('corrected');
+    await finish(queue.revoke(id));
+    expect(adapter.revoke).toHaveBeenCalledWith(
+      spec().targets[0],
+      'sent-one@g.us',
     );
   });
   it('rejects invalid content, intervals, missing media, invalid cards and duplicate targets', () => {

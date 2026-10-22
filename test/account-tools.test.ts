@@ -9,8 +9,8 @@ import {
 } from '../src/features/accountTools/guest';
 
 describe('per-account proxy configuration', () => {
-  it('disabling a proxy explicitly restores direct networking', () => {
-    expect(proxyRules(defaultTools().proxy)).toEqual({ mode: 'direct' });
+  it('disabling a proxy follows the system network without validating unused manual fields', () => {
+    expect(proxyRules(defaultTools().proxy)).toEqual({ mode: 'system' });
     expect(
       proxyRules({ ...defaultTools().proxy, enabled: true, mode: 'system' }),
     ).toEqual({ mode: 'system' });
@@ -153,7 +153,10 @@ describe('WhatsApp recipient/send adapter (synthetic modules, no real messages)'
     expect(listRecipients()).toEqual([]);
   });
   it('submits a text payload and waits for server acceptance', async () => {
-    expect(await sendTextToChat('123@g.us', 'hello')).toBe('synthetic-key');
+    expect(await sendTextToChat('123@g.us', 'hello')).toEqual({
+      messageId: 'synthetic-key',
+      confirmed: true,
+    });
     expect(submit).toHaveBeenCalledTimes(1);
     expect(submit.mock.calls[0][1]).toMatchObject({
       body: 'hello',
@@ -162,6 +165,42 @@ describe('WhatsApp recipient/send adapter (synthetic modules, no real messages)'
       ephemeralDuration: 60,
     });
   });
+  it.each(['OK', { messageSendResult: 'OK' }])(
+    'recognizes current WhatsApp acceptance result %p',
+    async result => {
+      submit.mockReturnValue([Promise.resolve({}), Promise.resolve(result)]);
+      expect(await sendTextToChat('123@g.us', 'hello')).toEqual({
+        messageId: 'synthetic-key',
+        confirmed: true,
+      });
+    },
+  );
+  it('preserves the allocated message ID when the acceptance promise rejects after dispatch', async () => {
+    submit.mockReturnValue([
+      Promise.resolve({}),
+      Promise.reject(new Error('receipt lost')),
+    ]);
+    expect(await sendTextToChat('123@g.us', 'hello')).toMatchObject({
+      messageId: 'synthetic-key',
+      confirmed: false,
+    });
+    expect(submit).toHaveBeenCalledTimes(1);
+  });
+  it('keeps the allocated message ID when waiting for a receipt times out', async () => {
+    jest.useFakeTimers();
+    try {
+      submit.mockReturnValue([Promise.resolve({}), new Promise(() => {})]);
+      const request = sendTextToChat('123@g.us', 'hello');
+      await jest.advanceTimersByTimeAsync(30_001);
+      expect(await request).toMatchObject({
+        messageId: 'synthetic-key',
+        confirmed: false,
+      });
+      expect(submit).toHaveBeenCalledTimes(1);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
   it('uses the correct sender for LID-addressed groups', async () => {
     chat.groupMetadata = { isLidAddressingMode: true };
     await sendTextToChat('123@g.us', 'hello');
@@ -169,7 +208,10 @@ describe('WhatsApp recipient/send adapter (synthetic modules, no real messages)'
   });
   it('never reports a failed/unknown server result as success or retries it', async () => {
     submit.mockReturnValue([Promise.resolve({}), Promise.resolve('unknown')]);
-    await expect(sendTextToChat('123@g.us', 'hello')).rejects.toThrow('核查');
+    expect(await sendTextToChat('123@g.us', 'hello')).toMatchObject({
+      messageId: 'synthetic-key',
+      confirmed: false,
+    });
     expect(submit).toHaveBeenCalledTimes(1);
   });
   it('rejects offline, read-only, unknown recipient and empty text before sending', async () => {

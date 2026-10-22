@@ -17,6 +17,14 @@ export interface BulkAdapter {
     spec: BulkSpec,
   ) => Promise<string | BulkSendOutcome>;
   revoke: (target: Recipient, messageId: string) => Promise<void>;
+  reconcile?: (
+    target: Recipient,
+    messageId: string | undefined,
+    spec: BulkSpec | undefined,
+    started: string,
+    ended: string,
+  ) => Promise<BulkSendOutcome>;
+  edit?: (target: Recipient, messageId: string, text: string) => Promise<void>;
 }
 export function validateBulkSpec(spec: BulkSpec) {
   if (spec.targets.length === 0 || spec.targets.length > 10_000)
@@ -51,7 +59,7 @@ export function validateBulkSpec(spec: BulkSpec) {
     throw new Error('间隔应为 0.5–3600 秒，输入状态应为 0–30 秒');
   if (
     spec.mentionAll &&
-    !['text', 'caption', 'video', 'document'].includes(spec.type)
+    !['text', 'image', 'caption', 'video', 'document'].includes(spec.type)
   )
     throw new Error('当前消息类型不支持 @所有人，请选择文本或含说明的附件');
   if (
@@ -67,7 +75,7 @@ export default class BulkQueue {
 
   activeId = '';
 
-  activeOperation: 'send' | 'revoke' = 'send';
+  activeOperation: 'send' | 'revoke' | 'check' | 'edit' = 'send';
 
   error = '';
 
@@ -220,7 +228,11 @@ export default class BulkQueue {
       await this.persist(record);
       for (const target of spec.targets) {
         if (this.stopped.has(record.id)) break;
-        let delivery: BulkDelivery = { target, status: 'sending' };
+        let delivery: BulkDelivery = {
+          target,
+          status: 'sending',
+          startedAt: new Date().toISOString(),
+        };
         record = {
           ...record,
           deliveries: [...(record.deliveries ?? []), delivery],
@@ -248,7 +260,8 @@ export default class BulkQueue {
             messageId: typeof result === 'string' ? result : result.messageId,
             error: confirmed
               ? undefined
-              : '未确认服务器接受，请在 WhatsApp 核查',
+              : (typeof result !== 'string' && result.error) ||
+                '未确认服务器接受，请在 WhatsApp 核查',
           };
           record = {
             ...record,
@@ -296,11 +309,13 @@ export default class BulkQueue {
       }
       await this.persist({
         ...record,
-        status: this.stopped.has(record.id)
-          ? '已停止'
-          : record.failed
-            ? '部分失败'
-            : '已完成',
+        status: record.deliveries?.some(d => d.status === 'uncertain')
+          ? '待确认'
+          : this.stopped.has(record.id)
+            ? '已停止'
+            : record.failed
+              ? '部分失败'
+              : '已完成',
         ended: new Date().toISOString(),
       });
     } catch {
@@ -312,6 +327,216 @@ export default class BulkQueue {
     } finally {
       this.activeId = '';
       this.stopped.delete(record.id);
+      this.notify();
+    }
+  }
+
+  private async bounded<T>(request: Promise<T>, message: string): Promise<T> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        request,
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error(message)), 45_000);
+        }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  async reconcile(id: string) {
+    if (this.activeId || this.submitting)
+      throw new Error('请先等待当前任务结束');
+    let record = this.records.find(r => r.id === id);
+    if (!record?.deliveries?.length || !this.adapter.reconcile)
+      throw new Error('记录缺少发送对象，无法自动核对');
+    this.activeId = id;
+    this.activeOperation = 'check';
+    this.notify();
+    try {
+      for (let i = 0; i < record.deliveries!.length; i += 1) {
+        const delivery = record.deliveries![i];
+        if (
+          delivery.revoked ||
+          (delivery.status === 'sent' && delivery.messageId)
+        )
+          continue;
+        let updated: BulkDelivery;
+        try {
+          // eslint-disable-next-line no-await-in-loop
+          const result = await this.bounded(
+            this.adapter.reconcile(
+              delivery.target,
+              delivery.messageId,
+              record.spec
+                ? {
+                    ...record.spec,
+                    text: delivery.editedText || record.spec.text,
+                  }
+                : undefined,
+              delivery.startedAt || record.spec?.scheduledAt || record.started,
+              record.ended || new Date().toISOString(),
+            ),
+            '核对超时，未重发任何消息',
+          );
+          updated = {
+            ...delivery,
+            messageId: result.messageId,
+            status: result.confirmed ? 'sent' : 'uncertain',
+            error: result.confirmed
+              ? undefined
+              : result.error || '服务器结果仍待确认',
+            checkedAt: new Date().toISOString(),
+            checkError: undefined,
+          };
+        } catch (error) {
+          updated = {
+            ...delivery,
+            checkedAt: new Date().toISOString(),
+            checkError: String(error),
+          };
+        }
+        const deliveries = record.deliveries!.map((d, index) =>
+          index === i ? updated : d,
+        );
+        const success = deliveries.filter(d => d.status === 'sent').length;
+        const failed = deliveries.filter(d =>
+          ['failed', 'uncertain', 'sending'].includes(d.status),
+        ).length;
+        const pending = deliveries.some(d =>
+          ['uncertain', 'sending'].includes(d.status),
+        );
+        record = {
+          ...record,
+          deliveries,
+          success,
+          failed,
+          status:
+            success === record.total
+              ? '已完成'
+              : pending
+                ? '待确认'
+                : record.status === '待确认'
+                  ? '部分失败'
+                  : record.status,
+        };
+        // eslint-disable-next-line no-await-in-loop
+        await this.persist(record);
+      }
+    } finally {
+      this.activeId = '';
+      this.notify();
+    }
+  }
+
+  async edit(id: string, text: string, targets: string[]) {
+    if (this.activeId || this.submitting)
+      throw new Error('请先等待当前任务结束');
+    if (!text.trim() || text.length > 12_000 || targets.length === 0)
+      throw new Error('请选择对象并填写 1–12000 字符的新内容');
+    let record = this.records.find(r => r.id === id);
+    if (
+      !record?.deliveries?.length ||
+      !this.adapter.edit ||
+      !['text', 'image', 'caption', 'video', 'document'].includes(
+        record.spec?.type || '',
+      )
+    )
+      throw new Error('该记录没有可编辑的文字消息，请先核对发送结果');
+    const selected = record.deliveries.filter(d =>
+      targets.includes(`${d.target.accountId}:${d.target.id}`),
+    );
+    if (
+      selected.length !== targets.length ||
+      selected.some(d => !d.messageId || d.revoked)
+    )
+      throw new Error('存在无法编辑的消息，请先核对消息编号');
+    this.activeId = id;
+    this.activeOperation = 'edit';
+    this.notify();
+    try {
+      record = {
+        ...record,
+        editStarted: new Date().toISOString(),
+        editEnded: undefined,
+      };
+      await this.persist(record);
+      for (let i = 0; i < record.deliveries!.length; i += 1) {
+        const delivery = record.deliveries![i];
+        if (!selected.includes(delivery)) continue;
+        record = {
+          ...record,
+          deliveries: record.deliveries!.map((d, index) =>
+            index === i
+              ? {
+                  ...d,
+                  editRequestedText: text.trim(),
+                  editRequestedAt: new Date().toISOString(),
+                  editError: undefined,
+                }
+              : d,
+          ),
+        };
+        // eslint-disable-next-line no-await-in-loop
+        await this.persist(record);
+        let updated: BulkDelivery;
+        try {
+          // eslint-disable-next-line no-await-in-loop
+          await this.bounded(
+            this.adapter.edit(
+              delivery.target,
+              delivery.messageId!,
+              text.trim(),
+            ),
+            '编辑结果超时未确认，请在 WhatsApp 核查，勿重复提交',
+          );
+          updated = {
+            ...record.deliveries![i],
+            status: 'sent',
+            error: undefined,
+            editedText: text.trim(),
+            editedAt: new Date().toISOString(),
+            editError: undefined,
+          };
+        } catch (error) {
+          updated = { ...record.deliveries![i], editError: String(error) };
+        }
+        record = {
+          ...record,
+          deliveries: record.deliveries!.map((d, index) =>
+            index === i ? updated : d,
+          ),
+        };
+        // eslint-disable-next-line no-await-in-loop
+        await this.persist(record);
+        if (updated.editError?.includes('超时')) break;
+      }
+      const all = record.deliveries!.filter(d => d.messageId && !d.revoked);
+      const texts = all.map(
+        d => d.editedText || record!.spec?.text || record!.text,
+      );
+      const success = record.deliveries!.filter(
+        d => d.status === 'sent',
+      ).length;
+      const failed = record.deliveries!.filter(d =>
+        ['failed', 'uncertain', 'sending'].includes(d.status),
+      ).length;
+      await this.persist({
+        ...record,
+        success,
+        failed,
+        status: success === record.total ? '已完成' : record.status,
+        editEnded: new Date().toISOString(),
+        editedText:
+          all.length > 0 &&
+          texts.every(value => value === texts[0]) &&
+          all.some(d => d.editedAt)
+            ? texts[0]
+            : undefined,
+      });
+    } finally {
+      this.activeId = '';
       this.notify();
     }
   }

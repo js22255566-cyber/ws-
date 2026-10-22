@@ -1,13 +1,14 @@
 /* eslint-disable no-void -- UI operations catch and display asynchronous errors. */
 import { ipcRenderer } from 'electron';
 import { observer } from 'mobx-react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type PointerEvent } from 'react';
 import {
   Dialog,
   DialogTitle,
   DialogContent,
   DialogActions,
   Button,
+  IconButton,
 } from '@mui/material';
 import type { RealStores } from '../../stores';
 import type { Recipient, BulkSpec, BulkMedia, BulkMessageType } from './config';
@@ -273,6 +274,15 @@ const BulkSend = observer(
         setSubmitting(false);
       }
     };
+    // Close on the primary mouse press as well as click/keyboard activation.
+    // Regaining window focus (for example after a Windows toast) can interrupt
+    // the later click event; this dismissal must not depend on that event.
+    const closeFromPointer = (event: PointerEvent<HTMLButtonElement>) => {
+      if (event.pointerType !== 'mouse' || event.button !== 0) return;
+      event.preventDefault();
+      event.stopPropagation();
+      onClose();
+    };
     return (
       <Dialog
         open
@@ -290,18 +300,39 @@ const BulkSend = observer(
               {creating ? '选择账号、对象并配置消息' : '发送记录'}
             </span>
           </span>
-          {!creating && (
-            <Button
-              variant="contained"
-              disabled={running || submitting}
-              onClick={() => {
-                setCreating(true);
-                setNotice('');
-              }}
+          <span className="bulk-dialog__header-actions">
+            {!creating && (
+              <Button
+                variant="contained"
+                disabled={running || submitting}
+                onClick={() => {
+                  setCreating(true);
+                  setNotice('');
+                }}
+              >
+                新建转发
+              </Button>
+            )}
+            <IconButton
+              className="bulk-dialog__close-icon"
+              aria-label="关闭转发窗口"
+              title="关闭转发窗口（任务继续后台执行）"
+              onPointerDown={closeFromPointer}
+              onClick={onClose}
             >
-              新建转发
-            </Button>
-          )}
+              <svg
+                width="20"
+                height="20"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                aria-hidden="true"
+              >
+                <path d="m6 6 12 12M18 6 6 18" />
+              </svg>
+            </IconButton>
+          </span>
         </DialogTitle>
         <DialogContent>
           {creating ? (
@@ -651,7 +682,7 @@ const BulkSend = observer(
                     checked={mentionAll}
                     onChange={e => setMentionAll(e.target.checked)}
                   />
-                  发送前 @所有人（仅群聊，含管理员）
+                  提及所有成员（仅群聊，含管理员；正文不显示名单）
                 </label>
                 <label htmlFor="bulk-failure">
                   消息失败策略
@@ -678,7 +709,7 @@ const BulkSend = observer(
               onCompose={record => {
                 const previous = record.spec;
                 setType(previous?.type ?? 'text');
-                setText(previous?.text ?? record.text);
+                setText(record.editedText || previous?.text || record.text);
                 setMedia(previous?.media);
                 setContactName(previous?.contactName ?? '');
                 setContactPhone(previous?.contactPhone ?? '');
@@ -706,6 +737,8 @@ const BulkSend = observer(
                 setNotice('已带入原任务，请核对账号、对象和内容后确认发送');
               }}
               onDelete={ids => queue.remove(ids)}
+              onReconcile={id => queue.reconcile(id)}
+              onEdit={(id, text, targets) => queue.edit(id, text, targets)}
               onStop={id => queue.stop(id)}
               onRevoke={(id, targets) => queue.revoke(id, targets)}
             />
@@ -720,7 +753,14 @@ const BulkSend = observer(
           </p>
         </DialogContent>
         <DialogActions>
-          {running && (
+          <Button
+            className="bulk-dialog__close"
+            onPointerDown={closeFromPointer}
+            onClick={onClose}
+          >
+            关闭
+          </Button>
+          {running && ['send', 'revoke'].includes(queue.activeOperation) && (
             <Button
               onClick={() =>
                 void queue
@@ -731,7 +771,6 @@ const BulkSend = observer(
               {queue.activeOperation === 'revoke' ? '停止撤回' : '停止发送'}
             </Button>
           )}
-          <Button onClick={onClose}>关闭</Button>
           {creating && (
             <>
               <Button onClick={() => setCreating(false)}>返回记录</Button>

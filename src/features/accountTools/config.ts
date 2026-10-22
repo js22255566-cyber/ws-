@@ -1,7 +1,7 @@
 // ZL-WA per-account tools. These settings never contain a persisted plaintext password.
 export interface ProxyConfig {
   enabled: boolean;
-  mode: 'direct' | 'system' | 'manual';
+  mode: 'system' | 'manual';
   protocol: 'http' | 'https' | 'socks5';
   host: string;
   port: string;
@@ -61,8 +61,8 @@ export const defaultTools = (): ToolsConfig => ({
   },
 });
 export function proxyRules(proxy: ProxyConfig): Electron.ProxyConfig {
-  if (!proxy.enabled || proxy.mode === 'direct') return { mode: 'direct' };
-  if (proxy.mode === 'system') return { mode: 'system' };
+  if (!proxy.enabled || proxy.mode === 'system') return { mode: 'system' };
+  if (proxy.mode !== 'manual') throw new Error('无效的代理配置方式');
   if (
     !['http', 'https', 'socks5'].includes(proxy.protocol) ||
     !/^(?:[\d.a-z-]+|\[[\d:a-f]+])$/i.test(proxy.host) ||
@@ -148,10 +148,19 @@ export interface BulkDelivery {
   revoked?: boolean;
   revokeError?: string;
   revokedAt?: string;
+  startedAt?: string;
+  checkedAt?: string;
+  checkError?: string;
+  editedText?: string;
+  editedAt?: string;
+  editError?: string;
+  editRequestedText?: string;
+  editRequestedAt?: string;
 }
 export interface BulkSendOutcome {
   messageId: string;
   confirmed: boolean;
+  error?: string;
 }
 export interface SendRecord {
   id: string;
@@ -167,4 +176,7 @@ export interface SendRecord {
   deliveries?: BulkDelivery[];
   revokeStarted?: string;
   revokeEnded?: string;
+  editedText?: string;
+  editStarted?: string;
+  editEnded?: string;
 }

@@ -161,6 +161,9 @@
       ];
       fixture.chats = chats;
       fixture.openChat = id => {
+        chats.forEach(c => {
+          c.active = c.id._serialized === id;
+        });
         const chat = chats.find(c => c.id._serialized === id);
         const title = document.querySelector('header span');
         title.dataset.id = id;
@@ -169,27 +172,67 @@
       };
       fixture.renderChats = () => {
         document.querySelector('#pane-side').replaceChildren(
-          ...chats.map(chat => {
-            const row = document.createElement('div');
-            row.className = 'fixture-chat';
-            row.setAttribute('role', 'row');
-            row.dataset.id = chat.id._serialized;
-            const title = document.createElement('div');
-            title.className = 'fixture-title';
-            title.dataset.testid = 'cell-frame-title';
-            const name = document.createElement('span');
-            name.title = chat.name;
-            name.textContent = chat.name;
-            title.append(name);
-            const preview = document.createElement('div');
-            preview.className = 'fixture-preview';
-            preview.textContent = '原生消息预览';
-            row.append(title, preview);
-            row.onclick = () => fixture.openChat(chat.id._serialized);
-            return row;
-          }),
+          ...[...chats]
+            .sort((a, b) => (b.pin || 0) - (a.pin || 0))
+            .map(chat => {
+              chat.set ??= (key, value) => {
+                chat[key] = value;
+                fixture.renderChats();
+              };
+              const row = document.createElement('div');
+              row.className = 'fixture-chat';
+              row.setAttribute('role', 'row');
+              row.dataset.id = chat.id._serialized;
+              const title = document.createElement('div');
+              title.className = 'fixture-title';
+              title.dataset.testid = 'cell-frame-title';
+              const name = document.createElement('span');
+              name.title = chat.name;
+              name.textContent = chat.name;
+              title.append(name);
+              const preview = document.createElement('div');
+              preview.className = 'fixture-preview';
+              preview.textContent = '原生消息预览';
+              const menu = document.createElement('button');
+              menu.dataset.testid = 'native-chat-menu';
+              menu.textContent = '⌄';
+              menu.onclick = event => {
+                event.stopPropagation();
+                document.querySelector('[role=menu]')?.remove();
+                const popup = document.createElement('div');
+                popup.setAttribute('role', 'menu');
+                const item = document.createElement('button');
+                item.setAttribute('role', fixture.menuRole || 'menuitem');
+                item.dataset.animateDropdownItem = 'true';
+                item.textContent = fixture.chineseMenu
+                  ? chat.pin
+                    ? '取消置顶聊天'
+                    : '置顶聊天'
+                  : chat.pin
+                    ? 'Unpin chat'
+                    : 'Pin chat';
+                item.onclick = () => {
+                  fixture.nativePinActions =
+                    (fixture.nativePinActions || 0) + 1;
+                };
+                popup.append(item);
+                document.body.append(popup);
+              };
+              row.append(title, preview, menu);
+              if (chat.pin) {
+                const icon = document.createElement('span');
+                icon.dataset.icon = 'pinned';
+                row.append(icon);
+              }
+              row.onclick = () => fixture.openChat(chat.id._serialized);
+              return row;
+            }),
         );
       };
+      document.addEventListener('keydown', event => {
+        if (event.key === 'Escape')
+          document.querySelector('[role=menu]')?.remove();
+      });
       fixture.renderChats();
       class MsgKey {
         static async newId() {
@@ -207,6 +250,12 @@
             get: id => chats.find(c => c.id._serialized === id),
           },
         },
+        WAWebProfilePicThumbCollection: {
+          ProfilePicThumb: {
+            get: () =>
+              fixture.ownAvatar ? { imgFull: fixture.ownAvatar } : undefined,
+          },
+        },
         WAWebSocketModel: { Socket: { state: 'CONNECTED' } },
         WAWebConnModel: {
           Conn: {
@@ -222,16 +271,21 @@
           }),
         },
         WAWebChatGetters: {
-          getActiveChat: () =>
-            chats.find(
-              c =>
-                c.id._serialized ===
-                document.querySelector('header span').dataset.id,
-            ) || {
-              id: {
-                _serialized: document.querySelector('header span').dataset.id,
-              },
-            },
+          getActiveChat: () => {
+            if (fixture.missingChatGetter)
+              throw new Error('Native getter unavailable');
+            return (
+              chats.find(
+                c =>
+                  c.id._serialized ===
+                  document.querySelector('header span').dataset.id,
+              ) || {
+                id: {
+                  _serialized: document.querySelector('header span').dataset.id,
+                },
+              }
+            );
+          },
         },
         WAWebMsgKey: MsgKey,
         WAWebWidFactory: { asUserWidOrThrow: x => x },
@@ -245,7 +299,7 @@
               Promise.resolve(message),
               fixture.fail
                 ? Promise.reject(Error('synthetic server failure'))
-                : Promise.resolve('success'),
+                : Promise.resolve('OK'),
             ];
           },
         },

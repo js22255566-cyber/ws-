@@ -699,3 +699,28 @@
     font-size: 20px;
   }
 }
+
+// Windows toasts occupy the lower right. Keep a dismissal at the opposite
+// corner and a second entry in the fixed header, independent of scrolling.
+.bulk-dialog__header-actions {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 12px;
+}
+.bulk-dialog .bulk-dialog__close,
+.bulk-dialog .bulk-dialog__close-icon {
+  -webkit-app-region: no-drag;
+  pointer-events: auto;
+}
+.bulk-dialog
+  > .MuiDialog-container
+  > .MuiPaper-root
+  > .MuiDialogActions-root
+  > .bulk-dialog__close {
+  margin-right: auto;
+  margin-left: 0;
+}
+.bulk-dialog .bulk-dialog__close-icon {
+  color: #8bbaff;
+}

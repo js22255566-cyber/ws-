@@ -1,7 +1,7 @@
 /* eslint-disable no-continue -- Skip unsupported or already translated message nodes. */
 
 // Self-contained guest functions; do not import host objects or expose host IPC.
-import type { Recipient, TranslationConfig } from './config';
+import type { Recipient, TranslationConfig, BulkSendOutcome } from './config';
 
 export interface TranslationRequest {
   id: number;
@@ -916,7 +916,7 @@ export function listRecipients(): Omit<Recipient, 'accountId'>[] {
 export async function sendTextToChat(
   chatId: string,
   text: string,
-): Promise<string> {
+): Promise<BulkSendOutcome> {
   if (globalThis.location.hostname !== 'web.whatsapp.com')
     throw new Error('当前会话不是 WhatsApp');
   if (!text.trim() || text.length > 12_000)
@@ -965,9 +965,34 @@ export async function sendTextToChat(
     chat,
     message,
   );
-  await created;
-  const outcome = await sent;
-  if (outcome !== 'success' && outcome?.messageSendResult !== 'success')
-    throw new Error('未确认服务器接受结果，请到 WhatsApp 核查，勿直接重发');
-  return id._serialized;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const settled = await Promise.race([
+    Promise.allSettled([created, sent]),
+    new Promise<null>(resolve => {
+      timer = setTimeout(() => resolve(null), 30_000);
+    }),
+  ]);
+  clearTimeout(timer);
+  const outcome: any =
+    settled?.[1].status === 'fulfilled' ? settled[1].value : undefined;
+  const model: any =
+    settled?.[0].status === 'fulfilled' ? settled[0].value : undefined;
+  let ack = model?.ack ?? message.ack;
+  try {
+    ack = req('WAWebCollections').Msg?.get(id._serialized)?.ack ?? ack;
+  } catch {
+    /* Receipt lookup is optional. */
+  }
+  const confirmed =
+    ack >= 1 ||
+    ['OK', 'success'].includes(outcome) ||
+    ['OK', 'success'].includes(outcome?.messageSendResult) ||
+    ['OK', 'success'].includes(outcome?.sendMsgResult?.messageSendResult);
+  return {
+    messageId: id._serialized,
+    confirmed,
+    ...(confirmed
+      ? {}
+      : { error: '发送结果待确认，请核对发送结果；请勿直接重发' }),
+  };
 }

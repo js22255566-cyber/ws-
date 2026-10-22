@@ -2,7 +2,11 @@
 import { ipcRenderer } from 'electron';
 import type { RealStores } from '../../stores';
 import { ensureBulkLibrary } from '../accountTools/bulkRuntime';
-import { customerTick, readCustomerContext } from './guest';
+import {
+  customerTick,
+  readCustomerContext,
+  customerRemarkResult,
+} from './guest';
 import {
   type CustomerAction,
   type CustomerBundle,
@@ -150,31 +154,76 @@ export class CustomerRuntime {
     view: Electron.WebviewTag,
     owner: string,
   ) {
+    if (action.owner && action.owner !== owner) return;
     const key = `${this.context?.token}:${action.id}`;
     if (this.actions.has(key)) return;
     this.actions.add(key);
     if (this.actions.size > 1000)
       this.actions.delete(this.actions.values().next().value!);
-    if (action.action === 'open') {
-      await ensureBulkLibrary(view);
-      await view.executeJavaScript(
-        `window.WPP.chat.openChatBottom(${JSON.stringify(action.chatId)},'Chatlist')`,
-      );
-    } else if (action.action === 'remark') {
-      const profile = await this.profile(owner, action.chatId);
-      if (this.bundle?.owner === owner) {
-        this.editor = { owner, chatId: action.chatId, profile };
-        this.notify();
+    switch (action.action) {
+      case 'importPins': {
+        this.adopt(
+          await ipcRenderer.invoke(
+            'customers-import-pins',
+            owner,
+            JSON.parse(action.value || '[]'),
+          ),
+        );
+
+        break;
       }
-    } else
-      this.adopt(
-        await ipcRenderer.invoke(
-          'customers-pin',
-          owner,
-          action.chatId,
-          action.action,
-        ),
-      );
+      case 'open': {
+        await ensureBulkLibrary(view);
+        await view.executeJavaScript(
+          `window.WPP.chat.openChatBottom(${JSON.stringify(action.chatId)},'Chatlist')`,
+        );
+
+        break;
+      }
+      case 'saveRemark': {
+        if (typeof action.value !== 'string' || action.value.length > 100)
+          throw new Error('备注名最多 100 字');
+        let error: string | undefined;
+        try {
+          this.adopt(
+            await ipcRenderer.invoke('customers-patch', owner, action.chatId, {
+              remarkName: action.value,
+            }),
+          );
+        } catch (error_) {
+          error = String(error_);
+          this.error = error;
+          this.notify();
+        }
+        await view.executeJavaScript(
+          `(${customerRemarkResult.toString()})(${JSON.stringify(owner)},${JSON.stringify(action.chatId)},${JSON.stringify(action.value)},${JSON.stringify(error)})`,
+        );
+        break;
+      }
+      case 'remark': {
+        const profile = await this.profile(owner, action.chatId);
+        if (this.bundle?.owner === owner) {
+          this.editor = { owner, chatId: action.chatId, profile };
+          this.notify();
+        }
+
+        break;
+      }
+      default: {
+        this.adopt(
+          await ipcRenderer.invoke(
+            'customers-pin',
+            owner,
+            action.chatId,
+            action.action,
+          ),
+        );
+      }
+    }
+  }
+
+  refresh() {
+    return this.tick();
   }
 
   private async tick() {
@@ -252,7 +301,7 @@ export class CustomerRuntime {
       const bundle = this.bundle!;
       const version = `${context.token}:${bundle.owner}:${bundle.revision}`;
       const actions: CustomerAction[] = await view.executeJavaScript(
-        `(${customerTick.toString()})(${this.injected.get(view) === version ? 'undefined' : JSON.stringify(bundle)})`,
+        `(${customerTick.toString()})(${this.injected.get(view) === version ? 'undefined' : JSON.stringify(bundle)},${JSON.stringify(context.chat?.id)})`,
       );
       this.injected.set(view, version);
       for (const action of actions) {

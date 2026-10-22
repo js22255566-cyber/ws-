@@ -14,7 +14,10 @@ import { Component, type ReactElement } from 'react';
 import ElectronWebView from 'react-electron-web-view';
 import type ServiceModel from '../../../models/Service';
 import type { RealStores } from '../../../stores';
-import { readWhatsAppSnapshot } from '../../../features/accounts/whatsapp';
+import {
+  readWhatsAppSnapshot,
+  mergeAccountSnapshot,
+} from '../../../features/accounts/whatsapp';
 import { configureTranslation } from '../../../features/accountTools/runtime';
 
 const debug = require('../../../preload-safe-debug')('Ferdium:Services');
@@ -87,7 +90,10 @@ class ServiceWebview extends Component<IProps> {
       );
       if (this.webview?.view !== view) return;
       runInAction(() => {
-        service.accountSnapshot = snapshot;
+        service.accountSnapshot = mergeAccountSnapshot(
+          service.accountSnapshot,
+          snapshot,
+        );
         if (
           Number.isFinite(snapshot.unreadMessages) ||
           snapshot.status === 'logged-out'

@@ -114,6 +114,9 @@ try {
       `window.ferdium.stores.services.all.some(s=>s.id===${JSON.stringify(id)})`,
       'new service model inserted',
     );
+    // Fixture counters must survive this long regression run. Automatic
+    // hibernation is tested separately; disable it only on these new fixtures.
+    await evaluate(`${service(id)}.isHibernationEnabled=false`);
     await vm(
       `process.getBuiltinModule('module').createRequire(process.cwd()+'/package.json')('electron').session.fromPartition('persist:service-${id}').protocol.handle('https',request=>new Response(${JSON.stringify(fixture)},{headers:{'Content-Type':'text/html; charset=utf-8'}}));true`,
     );
@@ -908,11 +911,14 @@ try {
       'PASS native connection-test IPC traverses a local HTTP CONNECT proxy and TLS destination',
     );
 
+    const systemRoute = await vm(
+      `(async()=>{const s=process.getBuiltinModule('module').createRequire(process.cwd()+'/package.json')('electron').session.fromPartition('zl-qa-system-${first}');await s.setProxy({mode:'system'});return s.resolveProxy('https://web.whatsapp.com')})()`,
+    );
     assert.equal(
       await evaluate(
         `require('@electron/remote').session.fromPartition('persist:service-${second}').resolveProxy('https://web.whatsapp.com')`,
       ),
-      'DIRECT',
+      systemRoute,
     );
     await evaluate(
       `(async()=>{const e=require('electron').ipcRenderer;const c=await e.invoke('account-tools-get',${JSON.stringify(first)});c.proxy.enabled=false;await e.invoke('account-tools-save',${JSON.stringify(first)},c)})()`,
@@ -921,10 +927,21 @@ try {
       await evaluate(
         `require('@electron/remote').session.fromPartition('persist:service-${first}').resolveProxy('https://web.whatsapp.com')`,
       ),
-      'DIRECT',
+      systemRoute,
     );
     console.log(
-      'PASS actual Electron account Session proxy routing and disable-to-DIRECT isolation',
+      'PASS actual Electron account Session proxy routing and disable-to-system-network isolation',
+    );
+    // The system-route assertions above intentionally honor the cloud host's
+    // ambient proxy. The remaining guest pages are local fixtures: isolate
+    // their transport from that external proxy to avoid native reloads while
+    // exercising message counters. Only this run's two test Sessions change.
+    await vm(
+      `(async()=>{const e=process.getBuiltinModule('module').createRequire(process.cwd()+'/package.json')('electron');for(const id of ${JSON.stringify(ids)}){const s=e.session.fromPartition('persist:service-'+id);await s.setProxy({mode:'direct'});await s.closeAllConnections()}return true})()`,
+    );
+    await wait(
+      `!${service(first)}.isLoading && ${service(first)}.accountSnapshot.status==='online' && !${service(second)}.isLoading && ${service(second)}.accountSnapshot.status==='online'`,
+      'local fixture Sessions remain online',
     );
     await clickText('☷群发');
     const checkBulkLayout = async () => {
@@ -1052,7 +1069,7 @@ try {
     await clickText('检查并发送');
     await clickText('确认发送');
     await wait(
-      `!!document.querySelector('.bulk-history') && document.querySelector('.bulk-history tbody tr')?.textContent.includes('已停止')`,
+      `!!document.querySelector('.bulk-history') && /^(已停止|待确认)$/.test(document.querySelector('.bulk-history tbody tr .bulk-status')?.textContent || '')`,
       'bulk stops on failure',
     );
     assert.equal(await guest(first, 'fixture.bulk.length'), 4);
@@ -1074,7 +1091,7 @@ try {
     );
     await clickText('停止发送');
     await wait(
-      `!!document.querySelector('.bulk-history') && document.querySelector('.bulk-history tbody tr')?.textContent.includes('已停止')`,
+      `!!document.querySelector('.bulk-history') && /^(已停止|待确认)$/.test(document.querySelector('.bulk-history tbody tr .bulk-status')?.textContent || '')`,
       'queue cancelled',
     );
     assert.equal(await guest(first, 'fixture.bulk.length'), 5);
@@ -1192,6 +1209,28 @@ try {
     first,
     `fixture.openChat('10002@c.us');fixture.chats[0].unreadCount=4;fixture.chats[1].unreadCount=3;true`,
   );
+  await guest(
+    first,
+    `(()=>{const canvas=document.createElement('canvas');canvas.width=canvas.height=2;canvas.getContext('2d').fillRect(0,0,2,2);fixture.ownAvatar=canvas.toDataURL();return true})()`,
+  );
+  await wait(
+    `document.querySelector('[data-service-id="${first}"] .account-card__portrait img')?.src.startsWith('data:image/')`,
+    'own account avatar loaded from native thumbnail',
+  );
+  const ownAvatar = await evaluate(
+    `document.querySelector('[data-service-id="${first}"] .account-card__portrait img').src`,
+  );
+  await guest(first, `fixture.ownAvatar='';true`);
+  await new Promise(resolve => {
+    setTimeout(resolve, 3300);
+  });
+  assert.equal(
+    await evaluate(
+      `document.querySelector('[data-service-id="${first}"] .account-card__portrait img')?.src`,
+    ),
+    ownAvatar,
+    'temporary missing thumbnail must not clear an own-account avatar',
+  );
   await clickText('客户');
   await wait(
     `!!document.querySelector('#customer-remark-name')`,
@@ -1222,7 +1261,7 @@ try {
     'muted messages excluded',
   );
   await wait(
-    `(async()=>{const v=await ${service(first)}.webview.executeJavaScript("document.querySelector('.zl-chat-note')?.textContent");return v==='红色客户备注'})()`,
+    `(async()=>{const v=await ${service(first)}.webview.executeJavaScript(${JSON.stringify(`document.querySelector('[data-id="10002@c.us"][role=row] .zl-chat-note')?.value`)});return v==='红色客户备注'})()`,
     'red remark injected into native row',
   );
   assert.equal(
@@ -1250,20 +1289,60 @@ try {
   );
   await guest(first, `fixture.openChat('10001@g.us');true`);
   await wait(
-    `document.querySelector('#customer-remark-name')?.value===''`,
-    'group has independent customer profile',
+    `document.querySelector('.customer-panel')?.textContent.includes('群聊不显示客户资料') && !document.querySelector('#customer-remark-name')`,
+    'groups have no customer form',
   );
-  await fillCustomer('#customer-remark-name', '群聊备注');
-  await fillCustomer('#customer-notes', '群聊长备注');
-  await guest(first, `fixture.openChat('10002@c.us');true`);
+  await guest(
+    first,
+    `(()=>{const input=document.querySelector('[data-id="10001@g.us"][role=row] .zl-chat-note');if(input.placeholder!=='添加备注')throw Error('Missing empty inline placeholder');input.focus();input.value='群聊快速备注';input.dispatchEvent(new Event('input',{bubbles:true}));input.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));return true})()`,
+  );
+  await wait(
+    `(async()=>{const r=await ${service(first)}.webview.executeJavaScript(${JSON.stringify(`document.querySelector('[data-id="10001@g.us"][role=row] .zl-chat-note')?.dataset.saveState`)});return r==='saved'})()`,
+    'group inline note saved without a popup',
+  );
+  assert.equal(
+    await evaluate(`document.querySelectorAll('[role=dialog]').length`),
+    0,
+  );
+  await guest(
+    first,
+    `fixture.openChat('10002@c.us');fixture.missingChatGetter=true;true`,
+  );
   await wait(
     `document.querySelector('#customer-notes')?.value==='仅客户面板显示的长备注'`,
-    'quick switch preserves original contact notes',
+    'private context works with missing native getter',
   );
+  await guest(
+    first,
+    `(()=>{const input=document.querySelector('[data-id="10002@c.us"][role=row] .zl-chat-note');input.focus();input.select();return true})()`,
+  );
+  await evaluate(`${service(first)}.webview.focus()`);
+  await call('Input.insertText', { text: '行内直接修改' });
+  await wait(
+    `document.querySelector('#customer-remark-name')?.value==='行内直接修改'`,
+    'inline autosave synchronizes private customer form',
+  );
+  assert.equal(
+    await guest(
+      first,
+      `document.activeElement?.classList.contains('zl-chat-note')`,
+    ),
+    true,
+    'autosave does not remove a focused editor',
+  );
+  await guest(
+    first,
+    `(()=>{const input=document.querySelector('[data-id="10002@c.us"][role=row] .zl-chat-note');input.value='取消这次修改';input.dispatchEvent(new Event('input',{bubbles:true}));input.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));return true})()`,
+  );
+  await wait(
+    `(async()=>await ${service(first)}.webview.executeJavaScript(${JSON.stringify(`document.querySelector('[data-id="10002@c.us"][role=row] .zl-chat-note')?.value==='行内直接修改'`)}))()`,
+    'Escape cancels only the unsaved inline draft',
+  );
+  await fillCustomer('#customer-remark-name', '红色客户备注');
   await guest(first, `fixture.openChat('10001@g.us');true`);
   await wait(
-    `document.querySelector('#customer-notes')?.value==='群聊长备注'`,
-    'quick switch flushes group edits',
+    `!document.querySelector('#customer-remark-name')`,
+    'group customer form stays hidden',
   );
   await click('[aria-label="关闭客户资料"]');
   await guest(
@@ -1278,21 +1357,21 @@ try {
     '10005@c.us',
   ]) {
     await wait(
-      `(async()=>!!(await ${service(first)}.webview.executeJavaScript(${JSON.stringify(`document.querySelector('[role=row][data-id="${id}"] .zl-chat-action') !== null`)})))()`,
-      'native row customer actions ready',
+      `(async()=>!!(await ${service(first)}.webview.executeJavaScript(${JSON.stringify(`document.querySelector('[role=row][data-id="${id}"] [data-testid=native-chat-menu]') !== null`)})))()`,
+      'native chat menu ready',
     );
     await guest(
       first,
-      `document.querySelector('[role=row][data-id="${id}"] .zl-chat-action')?.click();true`,
+      `(()=>{fixture.menuRole='${id === '10004@c.us' ? 'button' : 'menuitem'}';fixture.chineseMenu=${id === '10004@c.us'};const menu=document.querySelector('[role=row][data-id="${id}"] [data-testid=native-chat-menu]');menu.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true}));menu.click();document.querySelector('[data-animate-dropdown-item]').click();return true})()`,
     );
     await wait(
-      `(async()=>{return await ${service(first)}.webview.executeJavaScript("document.querySelector('.zl-local-pin')?.dataset.chatId === '${id}'")})()`,
+      `(async()=>{return await ${service(first)}.webview.executeJavaScript("document.querySelector('#pane-side [role=row]')?.dataset.id === '${id}'")})()`,
       'newest pin first',
     );
   }
   const order = await guest(
     first,
-    `[...document.querySelectorAll('.zl-local-pin')].map(n=>n.dataset.chatId)`,
+    `[...document.querySelectorAll('#pane-side [role=row]')].filter(n=>n.querySelector('[data-icon=pinned]')).map(n=>n.dataset.id)`,
   );
   assert.equal(order.length, 5);
   await guest(first, `fixture.chats.reverse();fixture.renderChats();true`);
@@ -1302,7 +1381,7 @@ try {
   assert.deepEqual(
     await guest(
       first,
-      `[...document.querySelectorAll('.zl-local-pin')].map(n=>n.dataset.chatId)`,
+      `[...document.querySelectorAll('#pane-side [role=row]')].filter(n=>n.querySelector('[data-icon=pinned]')).map(n=>n.dataset.id)`,
     ),
     order,
   );
@@ -1313,19 +1392,17 @@ try {
     `document.querySelector('#customer-remark-name')?.value==='红色客户备注'`,
     'contact profile restored',
   );
-  await guest(
-    first,
-    `document.querySelector('[role=row][data-id="10002@c.us"] .zl-chat-actions button:last-child').click();true`,
+  assert.equal(
+    await guest(
+      first,
+      `document.querySelectorAll('.zl-local-pins,.zl-chat-actions,.zl-chat-action').length`,
+    ),
+    0,
   );
+  await fillCustomer('#customer-remark-name', '客户面板编辑的备注');
   await wait(
-    `!!document.querySelector('input[aria-label="联系人备注名"]')`,
-    'native row remark editor',
-  );
-  await fillCustomer('input[aria-label="联系人备注名"]', '列表直接编辑的备注');
-  await clickText('保存备注名');
-  await wait(
-    `document.querySelector('#customer-remark-name')?.value==='列表直接编辑的备注'`,
-    'row remark synchronizes customer form',
+    `document.querySelector('.customer-panel [role=status]')?.textContent.includes('已保存')`,
+    'customer remark saved from panel',
   );
   assert.equal(
     await evaluate(`document.querySelector('#customer-notes').value`),
@@ -1338,19 +1415,22 @@ try {
   assert(copiedCustomer.includes('仅客户面板显示的长备注'));
   await guest(
     first,
-    `document.querySelector('.zl-local-pin button[title="↓"]').click();true`,
+    `(()=>{const menu=document.querySelector('[role=row][data-id="10005@c.us"] [data-testid=native-chat-menu]');menu.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true}));menu.click();if(document.querySelector('[role=menuitem]').textContent!=='Unpin chat')throw Error('native menu did not show unpin');document.querySelector('[role=menuitem]').click();return true})()`,
   );
   await wait(
-    `(async()=>await ${service(first)}.webview.executeJavaScript("document.querySelector('.zl-local-pin')?.dataset.chatId === '10004@c.us'"))()`,
-    'move pin down',
+    `(async()=>await ${service(first)}.webview.executeJavaScript("document.querySelectorAll('#pane-side [data-icon=pinned]').length === 4"))()`,
+    'native unpin updates original list',
   );
-  await guest(
-    first,
-    `document.querySelector('.zl-local-pin button[title="取消置顶"]').click();true`,
+  assert.equal(
+    await guest(first, `fixture.nativePinActions || 0`),
+    0,
+    'server pin actions never invoked',
   );
+  // Remount all native rows, like virtual scrolling, without duplicating pins.
+  await guest(first, `fixture.renderChats();true`);
   await wait(
-    `(async()=>await ${service(first)}.webview.executeJavaScript("document.querySelectorAll('.zl-local-pin').length === 4"))()`,
-    'unpin updates local list',
+    `(async()=>await ${service(first)}.webview.executeJavaScript("document.querySelector('#pane-side [role=row]')?.dataset.id === '10004@c.us'"))()`,
+    'native pinned order survives virtual row remount',
   );
   await shot('/workspace/ZL-WA-customers.png');
   await click(`[data-service-id="${second}"] .account-card__select`);
@@ -1364,7 +1444,7 @@ try {
   );
   await click('[aria-label="关闭客户资料"]');
   console.log(
-    'PASS customer autosave, quick chat switches, groups, multi-labels, red remark layout, profile isolation, private long notes, unlimited newest-first stable pins and unread counts',
+    'PASS own-avatar cache, private context fallback, group form exclusion, inline note Enter/autosave/Escape, multi-labels, layout, profile isolation, pins and unread counts',
   );
   // Delete only fixtures created by this run, using the existing real delete action.
   for (const id of ids) {
@@ -1381,6 +1461,25 @@ try {
   );
 } catch (error) {
   console.error(error);
+  for (const id of ids) {
+    try {
+      console.error(
+        'Fixture account diagnostic',
+        await evaluate(
+          `(()=>{const s=${service(id)};return {id:s.id,enabled:s.isEnabled,loading:s.isLoading,sleep:s.isHibernating,snapshot:{status:s.accountSnapshot.status,unread:s.accountSnapshot.unreadMessages}}})()`,
+        ),
+      );
+      console.error(
+        'Fixture page diagnostic',
+        await guest(
+          id,
+          `(()=>{try{return {url:location.href,online:navigator.onLine,socket:window.require?.('WAWebSocketModel')?.Socket?.state,count:fixture.bulk.length}}catch(e){return {error:String(e)}}})()`,
+        ),
+      );
+    } catch {
+      /* A disposed fixture cannot be inspected. */
+    }
+  }
   process.exitCode = 1;
 } finally {
   if (sidebarBefore) {

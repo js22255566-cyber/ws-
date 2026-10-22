@@ -2,6 +2,8 @@ import {
   sendBulkMessage,
   revokeBulkMessage,
   listBulkContacts,
+  reconcileBulkMessage,
+  editBulkMessage,
 } from '../src/features/accountTools/bulkGuest';
 import type { BulkSpec } from '../src/features/accountTools/config';
 
@@ -23,6 +25,19 @@ const spec = (type: BulkSpec['type'] = 'text'): BulkSpec => ({
   contactName: 'Test card',
   contactPhone: '8613800000000',
 });
+const ownMessage = (extra: any = {}) => ({
+  id: {
+    _serialized: 'own-id',
+    fromMe: true,
+    remote: { _serialized: 'chat@g.us' },
+  },
+  type: 'chat',
+  body: 'hello',
+  ack: 2,
+  t: Math.floor(Date.now() / 1000),
+  ...extra,
+});
+
 describe('advanced WhatsApp adapter with synthetic WPP, no real messages', () => {
   const originals = new Map<string, PropertyDescriptor | undefined>();
   let wpp: any;
@@ -103,7 +118,7 @@ describe('advanced WhatsApp adapter with synthetic WPP, no real messages', () =>
     await sendBulkMessage('chat@g.us', { ...spec(), mentionAll: true });
     expect(wpp.chat.sendTextMessage).toHaveBeenCalledWith(
       'chat@g.us',
-      '@member\nhello',
+      'hello',
       expect.objectContaining({
         mentionedList: ['member@lid'],
         detectMentioned: false,
@@ -140,6 +155,157 @@ describe('advanced WhatsApp adapter with synthetic WPP, no real messages', () =>
       revokeBulkMessage('chat@g.us', 'foreign-message'),
     ).rejects.toThrow('不属于');
     expect(wpp.chat.deleteMessage).toHaveBeenCalledTimes(1);
+  });
+  it.each(['OK', { messageSendResult: 'OK' }])(
+    'recognizes OK result %p even when the returned ACK snapshot is still zero',
+    async sendMsgResult => {
+      wpp.chat.sendTextMessage.mockResolvedValue({
+        id: 'accepted',
+        ack: 0,
+        sendMsgResult,
+      });
+      expect(await sendBulkMessage('chat@g.us', spec())).toEqual({
+        messageId: 'accepted',
+        confirmed: true,
+      });
+    },
+  );
+  it('recovers the unique own message by exact text, recipient and task time without sending', async () => {
+    wpp.chat.getMessages = jest.fn().mockResolvedValue([
+      ownMessage(),
+      ownMessage({
+        id: { fromMe: false, remote: { _serialized: 'chat@g.us' } },
+      }),
+      ownMessage({ t: 1 }),
+    ]);
+    const result = await reconcileBulkMessage(
+      'chat@g.us',
+      undefined,
+      spec(),
+      new Date(Date.now() - 1000).toISOString(),
+      new Date().toISOString(),
+    );
+    expect(result).toEqual({ messageId: 'own-id', confirmed: true });
+    expect(wpp.chat.sendTextMessage).not.toHaveBeenCalled();
+  });
+  it('refuses ambiguous matches and messages outside the selected account/chat', async () => {
+    wpp.chat.getMessages = jest
+      .fn()
+      .mockResolvedValue([ownMessage(), ownMessage()]);
+    await expect(
+      reconcileBulkMessage(
+        'chat@g.us',
+        undefined,
+        spec(),
+        new Date(Date.now() - 1000).toISOString(),
+        new Date().toISOString(),
+      ),
+    ).rejects.toThrow('多条相同');
+    wpp.chat.getMessageById.mockResolvedValue(
+      ownMessage({ id: { fromMe: false } }),
+    );
+    await expect(
+      reconcileBulkMessage('chat@g.us', 'foreign', spec(), '', ''),
+    ).rejects.toThrow('不属于');
+  });
+  it('preserves an unacknowledged recovered ID without claiming server acceptance', async () => {
+    wpp.chat.getMessageById.mockResolvedValue(ownMessage({ ack: 0 }));
+    expect(
+      await reconcileBulkMessage('chat@g.us', 'own-id', spec(), '', ''),
+    ).toMatchObject({ messageId: 'own-id', confirmed: false });
+  });
+  it('does not identify an attachment by timestamp alone', async () => {
+    wpp.chat.getMessages = jest.fn().mockResolvedValue([
+      ownMessage({
+        type: 'image',
+        body: '',
+        filename: 'wrong.png',
+        size: 10,
+      }),
+    ]);
+    await expect(
+      reconcileBulkMessage(
+        'chat@g.us',
+        undefined,
+        spec('image'),
+        new Date(Date.now() - 1000).toISOString(),
+        new Date().toISOString(),
+      ),
+    ).rejects.toThrow('未找到唯一');
+  });
+  it.each(['chat', 'image', 'video', 'document'])(
+    'edits a current own %s message in place with confirmed server results',
+    async type => {
+      wpp.chat.getMessageById.mockResolvedValue(ownMessage({ type }));
+      wpp.chat.editMessage = jest.fn().mockResolvedValue({
+        ack: 0,
+        sendMsgResult: { messageSendResult: 'OK' },
+      });
+      await editBulkMessage('chat@g.us', 'own-id', 'corrected');
+      expect(wpp.chat.editMessage).toHaveBeenCalledWith('own-id', 'corrected', {
+        waitForAck: true,
+      });
+      expect(wpp.chat.sendTextMessage).not.toHaveBeenCalled();
+    },
+  );
+  it('rejects expired, foreign, revoked and unsupported edits before changing WhatsApp', async () => {
+    wpp.chat.editMessage = jest.fn();
+    for (const message of [
+      ownMessage({ t: Math.floor(Date.now() / 1000) - 901 }),
+      ownMessage({ id: { fromMe: false } }),
+      ownMessage({ isRevokedByMe: true }),
+      ownMessage({ type: 'ptt' }),
+    ]) {
+      wpp.chat.getMessageById.mockResolvedValue(message);
+      // eslint-disable-next-line no-await-in-loop
+      await expect(
+        editBulkMessage('chat@g.us', 'own-id', 'corrected'),
+      ).rejects.toThrow();
+    }
+    expect(wpp.chat.editMessage).not.toHaveBeenCalled();
+  });
+  it('does not claim an edit with an unknown acknowledgment succeeded', async () => {
+    wpp.chat.getMessageById.mockResolvedValue(ownMessage());
+    wpp.chat.editMessage = jest.fn().mockResolvedValue({ ack: 0 });
+    await expect(
+      editBulkMessage('chat@g.us', 'own-id', 'corrected'),
+    ).rejects.toThrow('待确认');
+    expect(wpp.chat.editMessage).toHaveBeenCalledTimes(1);
+  });
+  it('keeps media captions unchanged while mentioning all members, including admins', async () => {
+    wpp.group.getParticipants.mockResolvedValue([
+      { id: { _serialized: 'member@lid' } },
+      { id: { _serialized: 'admin@c.us' }, isAdmin: true },
+    ]);
+    await sendBulkMessage(
+      'chat@g.us',
+      { ...spec('caption'), mentionAll: true },
+      'data:test;base64,AA==',
+    );
+    expect(wpp.chat.sendFileMessage).toHaveBeenCalledWith(
+      'chat@g.us',
+      'data:test;base64,AA==',
+      expect.objectContaining({
+        caption: 'hello',
+        mentionedList: ['member@lid', 'admin@c.us'],
+        detectMentioned: false,
+      }),
+    );
+  });
+  it('preserves existing mention metadata when editing an already sent message', async () => {
+    wpp.chat.getMessageById.mockResolvedValue(
+      ownMessage({ mentionedJidList: [{ _serialized: 'member@lid' }] }),
+    );
+    wpp.chat.editMessage = jest.fn().mockResolvedValue({ ack: 1 });
+    await editBulkMessage('chat@g.us', 'own-id', 'corrected');
+    expect(wpp.chat.editMessage).toHaveBeenCalledWith(
+      'own-id',
+      'corrected',
+      expect.objectContaining({
+        mentionedList: ['member@lid'],
+        detectMentioned: false,
+      }),
+    );
   });
   it('reads only this account saved contacts, excluding channels', async () => {
     expect(await listBulkContacts()).toEqual([

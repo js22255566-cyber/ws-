@@ -2,6 +2,7 @@ import {
   accountStatus,
   markAllWhatsAppRead,
   readWhatsAppSnapshot,
+  mergeAccountSnapshot,
 } from '../src/features/accounts/whatsapp';
 
 describe('WhatsApp account adapter', () => {
@@ -75,6 +76,70 @@ describe('WhatsApp account adapter', () => {
     expect(snapshot5.phone).toBeUndefined();
   });
 
+  it('loads own imgFull and keeps it when the thumbnail temporarily disappears', async () => {
+    modules.WAWebSocketModel = { Socket: { state: 'CONNECTED' } };
+    modules.WAWebUserPrefsMeUser = {
+      getMaybeMePnUser: () => ({ user: '8613800000001', server: 'c.us' }),
+    };
+    const get = jest
+      .fn()
+      .mockReturnValue({ imgFull: 'data:image/png;base64,b3du' });
+    modules.WAWebProfilePicThumbCollection = { ProfilePicThumb: { get } };
+    const first = await readWhatsAppSnapshot();
+    expect(first.avatar).toBe('data:image/png;base64,b3du');
+    get.mockReset();
+    const remounted = await readWhatsAppSnapshot();
+    expect(remounted.avatar).toBe(first.avatar);
+    modules.WAWebUserPrefsMeUser.getMaybeMePnUser = () => ({
+      user: '8613800000002',
+      server: 'c.us',
+    });
+    const other = await readWhatsAppSnapshot();
+    expect(other.avatar).toBeUndefined();
+  });
+  it('queries an unloaded own thumbnail at most once a minute', async () => {
+    modules.WAWebSocketModel = { Socket: { state: 'CONNECTED' } };
+    modules.WAWebUserPrefsMeUser = {
+      getMaybeMePnUser: () => ({ user: '8613800000001', server: 'c.us' }),
+    };
+    const find = jest
+      .fn()
+      .mockResolvedValue({ img: 'data:image/png;base64,b3du' });
+    modules.WAWebProfilePicThumbCollection = { ProfilePicThumb: { find } };
+    const first = await readWhatsAppSnapshot();
+    const second = await readWhatsAppSnapshot();
+    expect(first.avatar).toBe('data:image/png;base64,b3du');
+    expect(second.avatar).toBe(first.avatar);
+    expect(find).toHaveBeenCalledTimes(1);
+    expect(find).toHaveBeenCalledWith({
+      user: '8613800000001',
+      server: 'c.us',
+    });
+  });
+  it('retains host avatar only for a proven identical online owner', () => {
+    const previous = {
+      status: 'online' as const,
+      ownerId: 'one@c.us',
+      avatar: 'data:image/png;base64,b3du',
+    };
+    expect(
+      mergeAccountSnapshot(previous, { status: 'online', ownerId: 'one@c.us' })
+        .avatar,
+    ).toBe(previous.avatar);
+    expect(
+      mergeAccountSnapshot(previous, { status: 'online', ownerId: 'two@c.us' })
+        .avatar,
+    ).toBeUndefined();
+    expect(
+      mergeAccountSnapshot(previous, { status: 'online' }).avatar,
+    ).toBeUndefined();
+    expect(
+      mergeAccountSnapshot(previous, {
+        status: 'logged-out',
+        ownerId: 'one@c.us',
+      }).avatar,
+    ).toBeUndefined();
+  });
   it('counts actual unread messages in unmuted, unarchived groups and private chats only', async () => {
     modules.WAWebSocketModel = { Socket: { state: 'CONNECTED' } };
     // eslint-disable-next-line unicorn/consistent-function-scoping -- Local synthetic collection builder.

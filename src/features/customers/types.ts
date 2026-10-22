@@ -42,6 +42,7 @@ export interface CustomerBundle {
   summaries: Record<string, CustomerSummary>;
   aliases: Record<string, string>;
   pins: string[];
+  pinsInitialized?: boolean;
 }
 export interface CustomerContext {
   token: string;
@@ -57,8 +58,17 @@ export interface CustomerContext {
 export interface CustomerAction {
   id: number;
   chatId: string;
-  action: 'pin' | 'unpin' | 'up' | 'down' | 'remark' | 'open';
+  action:
+    | 'pin'
+    | 'unpin'
+    | 'up'
+    | 'down'
+    | 'remark'
+    | 'open'
+    | 'importPins'
+    | 'saveRemark';
   value?: string;
+  owner?: string;
 }
 export function validateCustomer(value: unknown): CustomerProfile {
   if (!value || typeof value !== 'object') throw new Error('无效客户资料');

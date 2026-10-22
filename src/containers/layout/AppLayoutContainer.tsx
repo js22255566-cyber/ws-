@@ -9,6 +9,7 @@ import type { StoresProps } from '../../@types/ferdium-components.types';
 import AppLayout from '../../components/layout/AppLayout';
 import AccountSidebar from '../../features/accounts/AccountSidebar';
 import AccountTools from '../../features/accountTools/AccountTools';
+import AccountNetworkStatus from '../../features/accountTools/AccountNetworkStatus';
 import Services from '../../components/services/content/Services';
 import AppLoader from '../../components/ui/AppLoader';
 import { workspaceStore } from '../../features/workspaces';
@@ -101,6 +102,7 @@ class AppLayoutContainer extends Component<IProps> {
       <MUIThemeProvider theme={ui.muiTheme}>
         <ThemeProvider theme={ui.theme}>
           <AppLayout
+            networkStatus={<AccountNetworkStatus stores={this.props.stores} />}
             settings={settings}
             isFullScreen={app.isFullScreen}
             showServicesUpdatedInfoBar={ui.showServicesUpdatedInfoBar}

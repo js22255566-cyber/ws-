@@ -26,6 +26,13 @@ export default function initCustomers(mainWindow: BrowserWindow) {
     getStore().link(owner, ids);
     return getStore().bundle(owner);
   });
+  ipcMain.handle(
+    'customers-import-pins',
+    (event, owner: string, ids: string[]) => {
+      check(event);
+      return getStore().importPins(owner, ids);
+    },
+  );
   ipcMain.handle('customers-profile', (event, owner: string, id: string) => {
     check(event);
     return getStore().profile(owner, id);

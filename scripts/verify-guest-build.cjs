@@ -31,6 +31,8 @@ const customers = require('../build/features/customers/guest');
     WAWebUpdateUnreadChatAction: { sendSeen: async () => {} },
   };
   const context = vm.createContext({
+    setTimeout,
+    clearTimeout,
     location: { hostname: 'web.whatsapp.com' },
     navigator: { onLine: true },
     window: { require: name => modules[name], addEventListener() {} },
@@ -72,9 +74,17 @@ const customers = require('../build/features/customers/guest');
       get: () => ({}),
       sendTextMessage: async () => ({ id: 'synthetic-message', ack: 1 }),
       getMessageById: async () => ({
-        id: { fromMe: true, remote: { _serialized: 'synthetic@g.us' } },
+        id: {
+          _serialized: 'synthetic-message',
+          fromMe: true,
+          remote: { _serialized: 'synthetic@g.us' },
+        },
+        type: 'chat',
+        t: Math.floor(Date.now() / 1000),
+        ack: 1,
       }),
       deleteMessage: async () => ({ isRevoked: true, sendMsgResult: 'OK' }),
+      editMessage: async () => ({ ack: 1 }),
     },
     contact: { list: async () => [] },
   };
@@ -87,6 +97,20 @@ const customers = require('../build/features/customers/guest');
   await call(advanced.revokeBulkMessage, [
     'synthetic@g.us',
     'synthetic-message',
+  ]);
+  const recovered = await call(advanced.reconcileBulkMessage, [
+    'synthetic@g.us',
+    'synthetic-message',
+    undefined,
+    '',
+    '',
+  ]);
+  assert.equal(recovered.messageId, 'synthetic-message');
+  assert.equal(recovered.confirmed, true);
+  await call(advanced.editBulkMessage, [
+    'synthetic@g.us',
+    'synthetic-message',
+    'corrected',
   ]);
   const contacts = await call(advanced.listBulkContacts);
   assert.equal(contacts.length, 0);

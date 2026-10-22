@@ -19,6 +19,24 @@ describe('local WhatsApp customers and unlimited pins', () => {
     store.bind([owner]);
   });
   afterEach(() => rmSync(root, { recursive: true, force: true }));
+  it('imports official pins once, preserves local order and never resurrects unpinned chats', () => {
+    store.bind([owner]);
+    store.pin(owner, '30001@c.us', 'pin');
+    expect(store.importPins(owner, ['30002@c.us', '30003@g.us']).pins).toEqual([
+      '30001@c.us',
+      '30002@c.us',
+      '30003@g.us',
+    ]);
+    store.pin(owner, '30002@c.us', 'unpin');
+    const restored = new CustomerStore(path);
+    expect(restored.importPins(owner, ['30002@c.us']).pins).toEqual([
+      '30001@c.us',
+      '30003@g.us',
+    ]);
+    expect(restored.bundle(owner).pinsInitialized).toBe(true);
+    expect(() => restored.importPins(owner, ['__proto__'])).toThrow();
+  });
+
   it('pins more than three chats newest first and persists stable order', () => {
     const chats = Array.from({ length: 12 }, (_, i) => `${10_000 + i}@c.us`);
     for (const id of chats) store.pin(owner, id, 'pin');

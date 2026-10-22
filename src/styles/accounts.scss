@@ -283,6 +283,14 @@
     background: #edb136;
   }
 }
+// The upstream div reset otherwise stretches MUI's invisible focus sentinels
+// over the backdrop, swallowing outside clicks instead of dismissing the menu.
+.account-context-menu {
+  [data-testid='sentinelStart'],
+  [data-testid='sentinelEnd'] {
+    height: 0;
+  }
+}
 .account-context-menu .MuiPaper-root {
   height: auto;
   svg path {

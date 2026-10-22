@@ -23,6 +23,10 @@ import TranslationQueue from '../../features/accountTools/TranslationQueue';
 import initBulkMedia from './bulkMedia';
 import TranslationCache from '../TranslationCache';
 import {
+  probeAccountNetwork,
+  type AccountNetworkStatus,
+} from '../AccountNetwork';
+import {
   normalizeBulkPreferences,
   type BulkPreferences,
 } from '../../features/accountTools/bulkPreferences';
@@ -77,10 +81,17 @@ export default ({ mainWindow }: { mainWindow: BrowserWindow }) => {
   const get = (id: string): StoredConfig => {
     const saved = data.accounts[id];
     const defaults = defaultTools();
+    const proxy = { ...defaults.proxy, ...saved?.proxy };
+    // Older versions offered a redundant direct mode. Keep the saved manual
+    // credentials, but migrate that selection to the disabled/system behavior.
+    if ((proxy.mode as string) === 'direct') {
+      proxy.enabled = false;
+      proxy.mode = 'manual';
+    }
     return {
       ...defaults,
       ...saved,
-      proxy: { ...defaults.proxy, ...saved?.proxy },
+      proxy,
       translation: { ...defaults.translation, ...saved?.translation },
     };
   };
@@ -116,8 +127,13 @@ export default ({ mainWindow }: { mainWindow: BrowserWindow }) => {
     for (const bridge of bridges.values()) bridge.close();
     bridges.clear();
   });
+  const networkCache = new Map<string, AccountNetworkStatus>();
+  const networkVersions = new Map<string, number>();
+  const networkPending = new Map<string, Promise<AccountNetworkStatus>>();
   const prepared = new Map<string, Promise<void>>();
   const apply = (id: string, config: StoredConfig) => {
+    networkCache.delete(id);
+    networkVersions.set(id, (networkVersions.get(id) || 0) + 1);
     const pending = (prepared.get(id) ?? Promise.resolve())
       .catch(() => {})
       .then(async () => {
@@ -294,6 +310,50 @@ export default ({ mainWindow }: { mainWindow: BrowserWindow }) => {
         throw error;
       }
       return publicConfig(id);
+    },
+  );
+  ipcMain.handle(
+    'account-tools-network-status',
+    async (event, id: string, force = false) => {
+      check(event, id);
+      attachAuth(id);
+      await (prepared.has(id) ? prepared.get(id) : apply(id, get(id)));
+      const cached = networkCache.get(id);
+      if (!force && cached && Date.now() - cached.checkedAt < 30_000)
+        return cached;
+      const version = networkVersions.get(id);
+      const key = `${id}:${version}`;
+      if (networkPending.has(key)) return networkPending.get(key);
+      const request = (async () => {
+        const s = session.fromPartition(`persist:service-${id}`);
+        const config = get(id);
+        if (config.proxy.enabled && config.proxy.mode === 'manual') {
+          for (const url of [
+            'https://www.cloudflare.com/cdn-cgi/trace',
+            'https://web.whatsapp.com/',
+          ]) {
+            // A failed proxy must never silently report the machine's direct IP.
+            // eslint-disable-next-line no-await-in-loop
+            if (!/^(PROXY|HTTPS|SOCKS)/.test(await s.resolveProxy(url)))
+              throw new Error('当前账号未使用配置的代理，请检查代理连接');
+          }
+        }
+        const result = await probeAccountNetwork(
+          accountTransport(s, config.proxy, () =>
+            decrypt(config.encryptedPassword),
+          ),
+        );
+        if (networkVersions.get(id) !== version)
+          throw new Error('网络配置已更改，请重新刷新');
+        networkCache.set(id, result);
+        return result;
+      })();
+      networkPending.set(key, request);
+      try {
+        return await request;
+      } finally {
+        networkPending.delete(key);
+      }
     },
   );
   ipcMain.handle('account-tools-test-proxy', async (event, id: string) => {

@@ -79,6 +79,7 @@ interface IProps extends WrappedComponentProps, WithStylesProps<typeof styles> {
   isFullScreen: boolean;
   sidebar: React.ReactElement;
   accountTools: React.ReactElement;
+  networkStatus: React.ReactElement;
   workspacesDrawer: React.ReactElement;
   services: React.ReactElement;
   showServicesUpdatedInfoBar: boolean;
@@ -144,10 +145,13 @@ class AppLayout extends Component<PropsWithChildren<IProps>, IState> {
             className={`app app--accounts ${useCompactWorkspaceDrawer ? 'app--compact-workspace' : ''}`}
           >
             {isWindows && !isFullScreen && (
-              <TitleBar
-                menu={window['ferdium'].menu.template}
-                icon="assets/images/logo.svg"
-              />
+              <div className="app-titlebar">
+                <TitleBar
+                  menu={window['ferdium'].menu.template}
+                  icon="assets/images/logo.svg"
+                />
+                {this.props.networkStatus}
+              </div>
             )}
             {isMac && !isFullScreen && (
               <span

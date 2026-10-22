@@ -1,3 +1,4 @@
+/* eslint-disable unicorn/consistent-function-scoping -- Serialized guest functions keep their helpers local. */
 // WhatsApp-specific integration stays outside the pinned upstream recipes.
 // Functions executed in a guest page must be self-contained (no outer closures).
 export interface AccountSnapshot {
@@ -5,6 +6,7 @@ export interface AccountSnapshot {
   nickname?: string;
   phone?: string;
   avatar?: string;
+  ownerId?: string;
   unreadMessages?: number;
 }
 
@@ -58,20 +60,97 @@ export async function readWhatsAppSnapshot(): Promise<AccountSnapshot> {
     .replaceAll('"', '')
     .split('@')[0]
     .split(':')[0];
-  const ownImage = document.querySelector<HTMLImageElement>(
-    '[aria-label="Profile"] img, [aria-label="个人资料"] img, #side header img',
+  const serialized = (id: any): string =>
+    id?._serialized ||
+    (id?.user
+      ? `${id.user}@${id.server || 'c.us'}`
+      : typeof id === 'string'
+        ? id
+        : '');
+  const ownerId = serialized(me);
+  const oldCache = page.__zlWaOwnAvatar;
+  const cache =
+    oldCache?.ownerId === ownerId
+      ? oldCache
+      : { ownerId, url: '', data: undefined, attempted: 0, queried: 0 };
+  page.__zlWaOwnAvatar = cache;
+  let ownImage = document.querySelector<HTMLImageElement>(
+    '[data-testid="menu-bar-profile"] img, [data-testid="menu-bar-avatar"] img, [aria-label="Profile"] img, [aria-label="个人资料"] img, [title="Profile"] img, [title="个人资料"] img, #side header img',
   );
-  const thumb =
-    me && module('WAWebProfilePicThumbCollection')?.ProfilePicThumb?.get?.(me);
-  const avatarUrl = ownImage?.src || thumb?.img || '';
-  let avatar: string | undefined;
-  // A blob URL from a guest Session cannot be loaded by the host renderer.
-  // Convert our own profile image locally; never use a selected contact's avatar.
-  if (avatarUrl) {
-    const cache = page.__zlWaOwnAvatar;
-    if (cache?.url === avatarUrl) avatar = cache.data;
-    else {
-      try {
+  if (ownImage?.closest?.('#main, [role="dialog"]')) ownImage = null;
+  const collection =
+    module('WAWebProfilePicThumbCollection')?.ProfilePicThumb ||
+    module('WAWebCollections')?.ProfilePicThumb ||
+    page.WPP?.whatsapp?.ProfilePicThumbStore;
+  const identities = [
+    me,
+    module('WAWebUserPrefsMeUser')?.getMaybeMeLidUser?.(),
+  ].filter(Boolean);
+  let thumb: any;
+  for (const identity of identities) {
+    try {
+      thumb =
+        collection?.get?.(identity) || collection?.get?.(serialized(identity));
+    } catch {
+      /* Wait for this identity's thumbnail. */
+    }
+    if (thumb) break;
+  }
+  let avatarUrl =
+    thumb?.img ||
+    thumb?.imgFull ||
+    thumb?.previewEurl ||
+    thumb?.eurl ||
+    ownImage?.currentSrc ||
+    ownImage?.src ||
+    '';
+  if (!avatarUrl && ownerId && Date.now() - cache.queried > 60_000) {
+    cache.queried = Date.now();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const request =
+        collection?.find && me
+          ? Reflect.apply(collection.find, collection, [me])
+          : page.WPP?.isReady && page.WPP.contact?.getProfilePictureUrl
+            ? page.WPP.contact.getProfilePictureUrl(ownerId, false)
+            : undefined;
+      if (request) {
+        const found: any = await Promise.race([
+          request,
+          new Promise<null>(resolve => {
+            timer = setTimeout(() => resolve(null), 2500);
+          }),
+        ]);
+        avatarUrl =
+          typeof found === 'string'
+            ? found
+            : found?.img ||
+              found?.imgFull ||
+              found?.previewEurl ||
+              found?.eurl ||
+              '';
+      }
+    } catch {
+      /* A temporary profile lookup failure must not clear the cached picture. */
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  let avatar: string | undefined = ownerId ? cache.data : undefined;
+  // Keep a verified own-account image across transient DOM removals / expired
+  // blob URLs. Never use the current conversation header as an avatar source.
+  if (
+    ownerId &&
+    avatarUrl &&
+    (cache.url !== avatarUrl || !cache.data) &&
+    Date.now() - cache.attempted > 10_000
+  ) {
+    cache.attempted = Date.now();
+    let data: string | undefined;
+    try {
+      if (avatarUrl.startsWith('data:image/') && avatarUrl.length < 700_000)
+        data = avatarUrl;
+      else {
         const response = await fetch(avatarUrl, {
           signal: AbortSignal.timeout(4000),
         });
@@ -80,8 +159,8 @@ export async function readWhatsAppSnapshot(): Promise<AccountSnapshot> {
           response.ok &&
           blob.type.startsWith('image/') &&
           blob.size < 512_000
-        ) {
-          avatar = await new Promise<string>((resolve, reject) => {
+        )
+          data = await new Promise<string>((resolve, reject) => {
             const reader = new FileReader();
             reader.addEventListener(
               'load',
@@ -91,15 +170,48 @@ export async function readWhatsAppSnapshot(): Promise<AccountSnapshot> {
             reader.addEventListener('error', reject, { once: true });
             reader.readAsDataURL(blob);
           });
-          page.__zlWaOwnAvatar = { url: avatarUrl, data: avatar };
+      }
+    } catch {
+      /* Some loaded images cannot be fetched again after their blob URL expires. */
+    }
+    if (
+      !data &&
+      ownImage?.complete &&
+      ownImage.naturalWidth > 0 &&
+      [ownImage.src, ownImage.currentSrc].includes(avatarUrl)
+    ) {
+      try {
+        const canvas = document.createElement('canvas');
+        const scale = Math.min(
+          1,
+          160 / Math.max(ownImage.naturalWidth, ownImage.naturalHeight),
+        );
+        canvas.width = Math.max(1, Math.round(ownImage.naturalWidth * scale));
+        canvas.height = Math.max(1, Math.round(ownImage.naturalHeight * scale));
+        const context = canvas.getContext('2d');
+        if (context) {
+          context.drawImage(ownImage, 0, 0, canvas.width, canvas.height);
+          data = canvas.toDataURL('image/png');
         }
       } catch {
-        /* Missing avatars use a local placeholder. */
+        /* Cross-origin images without permission keep the previous own avatar. */
       }
     }
+    if (data && data.length < 700_000 && page.__zlWaOwnAvatar === cache) {
+      cache.url = avatarUrl;
+      cache.data = data;
+      avatar = data;
+    }
   }
+  const latestOwner = serialized(
+    module('WAWebUserPrefsMeUser')?.getMaybeMePnUser?.() ??
+      module('WAWebConnModel')?.Conn?.wid,
+  );
+  if (ownerId && latestOwner && latestOwner !== ownerId)
+    return { status: 'loading' };
   return {
     status: 'online',
+    ownerId: ownerId || undefined,
     nickname:
       typeof conn?.pushname === 'string'
         ? conn.pushname.slice(0, 100)
@@ -139,6 +251,21 @@ export async function readWhatsAppSnapshot(): Promise<AccountSnapshot> {
       return count;
     })(),
   };
+}
+
+// Host snapshots can briefly omit a picture while WhatsApp remounts its DOM.
+// Reuse it only when both snapshots prove the same logged-in owner.
+export function mergeAccountSnapshot(
+  previous: AccountSnapshot,
+  next: AccountSnapshot,
+): AccountSnapshot {
+  return next.status === 'online' &&
+    next.ownerId &&
+    next.ownerId === previous.ownerId &&
+    !next.avatar &&
+    previous.avatar
+    ? { ...next, avatar: previous.avatar }
+    : next;
 }
 
 export async function markAllWhatsAppRead(): Promise<{

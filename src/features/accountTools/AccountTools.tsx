@@ -215,7 +215,7 @@ const SettingsPanel = observer(
                   onChange={enabled => proxy({ enabled })}
                 />
                 <p className="tools-muted">
-                  关闭后使用直连网络；应用时会刷新当前账号。
+                  关闭后使用系统默认网络环境；应用时会刷新当前账号。
                 </p>
                 <label htmlFor="zl-AccountTools-3">
                   配置方式
@@ -230,7 +230,6 @@ const SettingsPanel = observer(
                   >
                     <option value="manual">手动配置</option>
                     <option value="system">自动（系统代理）</option>
-                    <option value="direct">直接连接</option>
                   </select>
                 </label>
                 {config.proxy.mode === 'manual' && (

@@ -20,8 +20,16 @@ export async function saveTools(
   id: string,
   config: ToolsConfig,
 ): Promise<ToolsConfig> {
+  const previous = configs.get(id);
   const saved = await ipcRenderer.invoke('account-tools-save', id, config);
   configs.set(id, saved);
+  if (
+    JSON.stringify(previous?.proxy) !== JSON.stringify(saved.proxy) ||
+    config.proxy.password !== undefined
+  )
+    window.dispatchEvent(
+      new CustomEvent('zl-account-network-changed', { detail: id }),
+    );
   return saved;
 }
 export async function configureTranslation(

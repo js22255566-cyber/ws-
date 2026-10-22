@@ -3,7 +3,12 @@ import type { RealStores } from '../../stores';
 import type { Recipient } from './config';
 import BulkQueue from './BulkQueue';
 import { sendTextToChat } from './guest';
-import { sendBulkMessage, revokeBulkMessage } from './bulkGuest';
+import {
+  sendBulkMessage,
+  revokeBulkMessage,
+  reconcileBulkMessage,
+  editBulkMessage,
+} from './bulkGuest';
 
 let library: Promise<string> | undefined;
 const queues = new WeakMap<RealStores, BulkQueue>();
@@ -63,6 +68,24 @@ export function getBulkQueue(stores: RealStores): BulkQueue {
             throw new Error('账号窗口已变化，请重新检查');
           return view.executeJavaScript(
             `(${sendBulkMessage.toString()})(${JSON.stringify(target.id)},${JSON.stringify({ ...spec, targets: [target] })},${JSON.stringify(dataUrl)})`,
+          );
+        },
+        reconcile: async (target, messageId, spec, started, ended) => {
+          const view = viewFor(target);
+          await ensureBulkLibrary(view);
+          if (viewFor(target) !== view)
+            throw new Error('账号窗口已变化，请重新核对');
+          return view.executeJavaScript(
+            `(${reconcileBulkMessage.toString()})(${JSON.stringify(target.id)},${JSON.stringify(messageId)},${JSON.stringify(spec)},${JSON.stringify(started)},${JSON.stringify(ended)})`,
+          );
+        },
+        edit: async (target, messageId, text) => {
+          const view = viewFor(target);
+          await ensureBulkLibrary(view);
+          if (viewFor(target) !== view)
+            throw new Error('账号窗口已变化，请重新检查');
+          await view.executeJavaScript(
+            `(${editBulkMessage.toString()})(${JSON.stringify(target.id)},${JSON.stringify(messageId)},${JSON.stringify(text)})`,
           );
         },
         revoke: async (target, messageId) => {
