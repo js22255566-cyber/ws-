@@ -26,7 +26,7 @@ import { v4 as uuidV4 } from 'uuid';
 import type { Stores } from '../@types/stores.types';
 import type { Actions } from '../actions/lib/actions';
 import type { ApiInterface } from '../api';
-import { CHECK_INTERVAL, DEFAULT_APP_SETTINGS } from '../config';
+import { DEFAULT_APP_SETTINGS } from '../config';
 import {
   electronVersion,
   isMac,
@@ -244,7 +244,7 @@ export default class AppStore extends TypedStore {
     }, ms('60m'));
 
     // Check for updates once every 4 hours
-    setInterval(() => this._checkForUpdates({ manual: false }), CHECK_INTERVAL);
+    setInterval(() => this._checkForUpdates({ manual: false }), ms('4h'));
     // Check for an update in 30s (need a delay to prevent Squirrel Installer lock file issues)
     setTimeout(() => this._checkForUpdates({ manual: false }), ms('30s'));
     ipcRenderer.on('autoUpdate', (_, data) => {
