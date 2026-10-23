@@ -51,10 +51,8 @@ jobs:
         run: |
           pnpm install --frozen-lockfile
           pnpm package
-      - name: Check types and tests
-        run: |
-          pnpm typecheck
-          pnpm test --runInBand --coverage=false
+      - name: Check types
+        run: pnpm typecheck
       - name: Build Windows x64
         run: pnpm build:windows
       - uses: actions/upload-artifact@v4

@@ -1,43 +1,33 @@
 # ZL-WA
 
-基于 **Ferdium 7.2.3** 的 Windows 桌面应用基础版，保留上游的多服务、多账号等功能。
-当前包含独立应用身份、数据目录、可折叠分组、账户卡片、手动休眠，以及右侧的账号代理、双向翻译和文字批量发送。
+Windows 桌面 WhatsApp 多开客户端：在一个窗口里分组管理多个 WhatsApp 账号，每个账号独立登录、独立代理，并带有收发翻译、群发、群组管理（发言管理、批量进群、批量退群）和客户资料等工具。
 
-- 应用名称：`ZL-WA`
-- 应用 ID：`com.zl-wa.desktop`
-- Windows 正式版数据：`%APPDATA%\ZL-WA`
-- Windows 开发版数据：`%APPDATA%\ZL-WADev`
-- 便携版数据：可执行文件旁的 `ZL-WAAppData`
+基于开源项目 [Ferdium](https://github.com/ferdium/ferdium-app) 7.2.3 修改（Apache-2.0），许可证见 [LICENSE.md](LICENSE.md)；服务配方来自 recipes 子模块，遵循其自身许可证。各工具的使用说明见 [docs/ACCOUNT-TOOLS.md](docs/ACCOUNT-TOOLS.md)。
 
-详细操作及验收步骤见 [开发与测试说明](docs/ZL-WA.md)。
-本轮新增的账户分组、卡片和菜单说明见 [分组账户侧栏](docs/ACCOUNTS.md)。
-代理、两步发送翻译和文字群发说明见 [账号工具](docs/ACCOUNT-TOOLS.md)。
-基于开源项目 [Ferdium](https://github.com/ferdium/ferdium-app)（Apache-2.0），许可证见 [LICENSE.md](LICENSE.md)。
+## 下载
 
-## Windows 开发
+在本仓库 [Releases](../../releases) 下载：
 
-安装 Node.js **24.18.1**、pnpm **11.20.0** 和 Visual Studio Build Tools（C++ 工具及 Windows SDK），在 PowerShell 中执行：
+- `ZL-WA-win-AutoSetup-版本-x64.exe`：安装版
+- `ZL-WA-win-Portable-版本-x64.exe`：便携版，数据保存在 exe 旁的 `ZL-WAAppData`
 
-若使用随附的源码 ZIP，已包含 recipes 源码，跳过下面的 `git submodule` 命令。ZIP 是源码，不是可直接运行的安装包。
+安装版数据位于 `%APPDATA%\ZL-WA`。首次启动直接进入主界面，在左侧分组点击「新增会话」并用手机扫码登录 WhatsApp。
+
+## 打包新版本
+
+1. 修改 `package.json` 的 `version`，提交并推送到 `main`。
+2. 在 GitHub → Actions → **ZL-WA Windows** → Run workflow：
+   - `new_release` 填 `v` + 版本号（如 `v7.2.12`）：打包并自动创建 Release，带 `-` 的版本（如 `v7.2.12-beta.1`）发布为测试版；
+   - 都留空：只打包，exe 在运行结果的附件里。
+
+本地打包需要 Node.js 24.18.1、pnpm 11.20.0 和 Visual Studio Build Tools（C++ 工具及 Windows SDK）：
 
 ```powershell
 git submodule update --init --recursive
 pnpm install --frozen-lockfile
 pnpm exec install-electron
-Push-Location recipes
-pnpm install --frozen-lockfile
-pnpm package
-Pop-Location
-pnpm start:all-dev
-```
-
-## Windows 打包
-
-```powershell
+Push-Location recipes; pnpm install --frozen-lockfile; pnpm package; Pop-Location
 pnpm build:windows
 ```
 
-生成的 x64 安装包和便携版位于 `out`。也可在推送本仓库后手动运行 GitHub Actions 的 **ZL-WA Windows** 工作流，下载构建附件。
-当前没有配置自己的代码签名证书；Windows 可能显示未知发布者提示。
-
-首次使用可选择“不使用账户”，之后添加 WhatsApp 并用手机扫码。这里的桌面应用账户与 WhatsApp 账户是两回事。
+生成的 exe 在 `out` 文件夹。未配置代码签名，Windows 可能提示「未知发布者」。

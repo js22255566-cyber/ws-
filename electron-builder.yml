@@ -16,7 +16,7 @@ extraResources:
     to: FERDIUM-LICENSE.md
   - from: recipes/LICENSE.md
     to: FERDIUM-RECIPES-LICENSE.md
-  - from: docs/ZL-WA.md
+  - from: README.md
     to: ZL-WA-SOURCE.md
   - from: docs/ACCOUNT-TOOLS.md
     to: ZL-WA-ACCOUNT-TOOLS.md
