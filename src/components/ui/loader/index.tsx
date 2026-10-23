@@ -5,6 +5,7 @@ import injectStyle, { type WithStylesProps } from 'react-jss';
 import { Oval } from 'react-loader-spinner';
 import type { FerdiumStores } from '../../../@types/stores.types';
 import { DEFAULT_LOADER_COLOR } from '../../../config';
+import { resolveAccentColor } from '../../../helpers/apple-design-helpers';
 
 const styles = () => ({
   container: {
@@ -31,7 +32,9 @@ class LoaderComponent extends Component<IProps> {
       classes,
       className,
       size = 100,
-      color = this.props.stores?.settings.app.accentColor,
+      color = this.props.stores?.settings.app.accentColor === undefined
+        ? undefined
+        : resolveAccentColor(this.props.stores.settings.app.accentColor),
       loaded = false,
     } = this.props;
     const loaderColor = color ?? DEFAULT_LOADER_COLOR;

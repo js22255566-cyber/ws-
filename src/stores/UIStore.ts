@@ -7,7 +7,9 @@ import type { Stores } from '../@types/stores.types';
 import type { Actions } from '../actions/lib/actions';
 import type { ApiInterface } from '../api';
 import { DEFAULT_ACCENT_COLOR } from '../config';
+import { resolveAccentColor } from '../helpers/apple-design-helpers';
 import { type Theme, ThemeType, theme } from '../themes';
+import { appleMuiThemeOptions } from '../themes/apple-mui';
 import TypedStore from './lib/TypedStore';
 import { appThemeSource } from '../features/appearance/theme';
 
@@ -105,22 +107,20 @@ export default class UIStore extends TypedStore {
   @computed get theme(): Theme {
     const themeId = this.isDarkThemeActive ? ThemeType.dark : ThemeType.default;
     const { accentColor } = this.stores.settings.app;
-    return theme(themeId, accentColor);
+    return theme(themeId, resolveAccentColor(accentColor));
   }
 
   @computed get muiTheme() {
     const { accentColor } = this.stores.settings.app;
 
-    return createTheme({
-      palette: {
-        mode: this.isDarkThemeActive ? 'dark' : 'light',
-        primary: {
-          main: tinycolor(accentColor).isValid()
-            ? accentColor
-            : DEFAULT_ACCENT_COLOR,
-        },
-      },
-    });
+    return createTheme(
+      appleMuiThemeOptions(
+        this.isDarkThemeActive ? 'dark' : 'light',
+        tinycolor(accentColor).isValid()
+          ? resolveAccentColor(accentColor)
+          : DEFAULT_ACCENT_COLOR,
+      ),
+    );
   }
 
   // Actions

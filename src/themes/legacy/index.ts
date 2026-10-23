@@ -9,8 +9,8 @@ export const themeGrayLight = '#818a91';
 export const themeGrayLighter = '#eceeef';
 export const themeGrayLightest = '#f7f7f9';
 
-export const themeBorderRadius = '6px';
-export const themeBorderRadiusSmall = '3px';
+export const themeBorderRadius = '8px';
+export const themeBorderRadiusSmall = '6px';
 
 export const darkThemeBlack = '#1A1A1A';
 

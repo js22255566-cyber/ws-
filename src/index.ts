@@ -266,12 +266,11 @@ const createWindow = () => {
       ),
     ),
   });
+  // Match the first painted frame to the window background (as native apps
+  // do) instead of flashing the accent colour while the renderer loads.
   const backgroundColor = nativeTheme.shouldUseDarkColors
     ? darkThemeGrayDarkest
-    : (retrieveSettingValue(
-        'accentColor',
-        DEFAULT_APP_SETTINGS.accentColor,
-      ) as string);
+    : '#F5F5F7';
 
   const linuxMainWindowConf = {
     icon: asarPath(

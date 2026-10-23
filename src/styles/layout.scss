@@ -19,7 +19,7 @@ html {
 }
 
 .theme__dark .app {
-  background: #272727;
+  background: var(--zl-bg-window);
 
   .sidebar {
     background: $dark-theme-gray-darker;
@@ -109,7 +109,7 @@ body.win32:not(.isFullScreen) .app .app__content {
 }
 
 .app {
-  background: #fff;
+  background: var(--zl-bg-window);
 
   .app__content {
     display: flex;

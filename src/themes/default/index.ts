@@ -8,12 +8,13 @@ import * as legacyStyles from '../legacy';
 export default (brandPrimary: string) => {
   if (!brandPrimary) {
     // eslint-disable-next-line no-param-reassign
-    brandPrimary = '#7266F0';
+    brandPrimary = '#007AFF';
   }
-  const brandSuccess = '#5cb85c';
-  const brandInfo = '#5bc0de';
-  const brandWarning = '#FF9F00';
-  const brandDanger = '#d9534f';
+  // ZL-WA: Apple system colours.
+  const brandSuccess = '#34C759';
+  const brandInfo = '#5AC8FA';
+  const brandWarning = '#FF9500';
+  const brandDanger = '#FF3B30';
   const uiFontSize = 14;
   const colorBackground = legacyStyles.themeGrayLighter;
   const colorContentBackground = DEFAULT_LOADER_COLOR;

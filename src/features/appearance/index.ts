@@ -4,7 +4,6 @@ import TopBarProgress from 'react-topbar-progress-indicator';
 
 import { pathExistsSync, readFileSync } from 'fs-extra';
 import {
-  DEFAULT_APP_SETTINGS,
   SERVICE_WEBVIEW_BORDER_RADIUS_DEFAULT,
   SERVICE_WEBVIEW_BORDER_RADIUS_MAX,
   SERVICE_WEBVIEW_BORDER_RADIUS_MIN,
@@ -19,6 +18,10 @@ import {
 import { isLinux, isWindows } from '../../environment';
 import { userDataPath } from '../../environment-remote';
 import { workspaceStore } from '../workspaces';
+import {
+  accentCustomProperties,
+  resolveAccentColor,
+} from '../../helpers/apple-design-helpers';
 
 const STYLE_ELEMENT_ID = 'custom-appearance-style';
 
@@ -76,17 +79,14 @@ const generateUserCustomCSS = () => {
   return pathExistsSync(path) ? readFileSync(path).toString() : '';
 };
 
-const generateAccentStyle = accentColorStr => {
-  let accentColor;
-  try {
-    accentColor = color(accentColorStr);
-  } catch {
-    // eslint-disable-next-line no-param-reassign
-    accentColorStr = DEFAULT_APP_SETTINGS.accentColor;
-    accentColor = color(accentColorStr);
-  }
+const generateAccentStyle = rawAccentColorStr => {
+  // Always a valid #RRGGBB; legacy upstream purple maps to system blue.
+  const accentColorStr = resolveAccentColor(rawAccentColorStr);
+  const accentColor = color(accentColorStr);
   const darkerColorStr = darkenAbsolute(accentColor, 5).hex();
   return `
+    :root { ${accentCustomProperties(accentColorStr)} }
+
     .theme__dark .app .sidebar .sidebar__button.is-muted,
     .theme__dark .app .sidebar .sidebar__button.is-active,
     .sidebar .sidebar__button.is-muted,
@@ -590,11 +590,9 @@ const generateStyle = (settings, app) => {
     serviceWebviewBorderRadius,
   );
 
-  if (
-    accentColor.toLowerCase() !== DEFAULT_APP_SETTINGS.accentColor.toLowerCase()
-  ) {
-    style += generateAccentStyle(accentColor);
-  }
+  // ZL-WA: always emit the accent so the design tokens (--zl-accent) exist
+  // and the legacy upstream purple is remapped even for the default value.
+  style += generateAccentStyle(accentColor);
 
   style += generateServiceRibbonWidthStyle(
     serviceRibbonWidth,

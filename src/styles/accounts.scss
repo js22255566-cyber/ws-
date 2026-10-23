@@ -1,7 +1,19 @@
 // ZL-WA account sidebar; folding groups never unmounts service webviews.
+//
+// Styled as a native source list (HIG "Sidebars"): a recessed material
+// background, section headers in secondary label colour, rows that highlight
+// on hover and fill with the accent tint when selected. Colours come from the
+// semantic tokens in zl-design.scss so light and dark appearance both work.
+//
+// Confirmed dimensions kept from earlier releases (do not change casually):
+// unread digits 20px / 800 red on a transparent background; sleep icon 20px in
+// a 26px target; "more" icons 20px in a 28px target; collapse button 24px icon
+// in a bordered 36×40 target; collapsed width 84px; session menu 128px wide;
+// remark popover 300px wide.
 .app--accounts .app__service {
   min-width: 0;
 }
+
 .account-sidebar {
   // Upstream's reset gives every div height: 100%; cards need natural height.
   div {
@@ -19,40 +31,60 @@
   height: 100%;
   padding: 12px 10px 8px;
   box-sizing: border-box;
-  background: #111318;
-  color: #f3f4f6;
-  border-right: 1px solid #292d36;
-  font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
-  font-size: 14px;
+  background: var(--zl-bg-sidebar);
+  color: var(--zl-label);
+  border-right: 1px solid var(--zl-separator);
+  font-family: var(--zl-font-text);
+  font-size: var(--zl-text-body);
+  // Chrome text is not selectable in native apps; fields still are.
+  user-select: none;
+  transition:
+    width var(--zl-duration-slow) var(--zl-ease-out),
+    min-width var(--zl-duration-slow) var(--zl-ease-out),
+    flex-basis var(--zl-duration-slow) var(--zl-ease-out),
+    padding var(--zl-duration-slow) var(--zl-ease-out);
+
   button {
     font: inherit;
     color: inherit;
-    cursor: pointer;
+    cursor: default; // native controls use the arrow cursor
     border: 0;
     background: transparent;
+    transition:
+      background-color var(--zl-duration-fast) var(--zl-ease),
+      color var(--zl-duration-fast) var(--zl-ease),
+      box-shadow var(--zl-duration-fast) var(--zl-ease),
+      opacity var(--zl-duration-fast) var(--zl-ease);
   }
   button:disabled {
-    opacity: 0.45;
-    cursor: not-allowed;
+    opacity: 0.4;
   }
   button:focus-visible {
-    outline: 2px solid #75aaff;
-    outline-offset: 2px;
+    outline: none;
+    box-shadow: var(--zl-focus-ring);
   }
+
   &__new-group {
     flex: 0 0 40px;
+    height: 40px;
     width: 100%;
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 8px;
-    background: #0754da !important;
-    border-radius: 8px;
-    font-size: 17px !important;
-    &:hover {
-      background: #1769ed !important;
+    gap: 6px;
+    border-radius: var(--zl-radius-md);
+    background: var(--zl-accent) !important;
+    color: var(--zl-on-accent) !important;
+    font-size: var(--zl-text-title3) !important;
+    font-weight: 600;
+    &:hover:not(:disabled) {
+      background: var(--zl-accent-hover) !important;
+    }
+    &:active:not(:disabled) {
+      background: var(--zl-accent-pressed) !important;
     }
   }
+
   &__groups {
     height: 0 !important;
     flex: 1;
@@ -60,72 +92,127 @@
     overflow-x: hidden;
     min-height: 0;
     padding-bottom: 12px;
+    margin: 0 -6px;
+    padding-inline: 6px;
   }
+
+  // Transient, HUD-like banner. Informational notices fade out on their own.
   &__notice {
     position: relative;
     margin-top: 10px;
-    padding: 10px 22px 10px 10px;
-    background: #26354a;
-    border-radius: 6px;
-    font-size: 12px;
-    line-height: 1.6;
+    padding: 9px 30px 9px 11px;
+    background: var(--zl-info-bg);
+    color: var(--zl-label);
+    border-radius: var(--zl-radius-md);
+    font-size: var(--zl-text-callout);
+    line-height: 1.5;
     overflow-wrap: anywhere;
+    user-select: text;
+    animation: zl-pop-in var(--zl-duration) var(--zl-ease-out);
+    &.is-error {
+      background: var(--zl-danger-bg);
+      color: var(--zl-danger-text);
+    }
     button {
       position: absolute;
-      right: 3px;
-      top: 3px;
+      right: 4px;
+      top: 4px;
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      color: var(--zl-label-secondary);
+      font-size: 16px;
+      line-height: 1;
+      &:hover {
+        background: var(--zl-hover);
+        color: var(--zl-label);
+      }
     }
   }
+
   &__footer {
     display: flex;
     justify-content: space-around;
     padding-top: 8px;
-    border-top: 1px solid #2a2f38;
+    border-top: 1px solid var(--zl-separator);
     gap: 4px;
     button {
       display: flex;
       gap: 4px;
       align-items: center;
-      border-radius: 4px;
-      padding: 6px;
-      font-size: 12px;
-      color: #aeb8c9;
+      border-radius: var(--zl-radius-sm);
+      padding: 5px 8px;
+      font-size: var(--zl-text-callout);
+      color: var(--zl-label-secondary);
       &:hover {
-        color: white;
-        background: #252a34;
+        color: var(--zl-label);
+        background: var(--zl-hover);
+      }
+      &:active {
+        background: var(--zl-pressed);
       }
     }
   }
 }
+
 .account-group {
-  margin-top: 12px;
+  margin-top: 14px;
+  &:first-child {
+    margin-top: 10px;
+  }
   &__header {
     display: flex;
     align-items: center;
-    min-height: 34px;
+    min-height: 28px;
     gap: 2px;
+    padding-inline: 2px;
   }
+  // Section header: secondary label, semibold, like a Finder sidebar section.
   &__toggle {
     flex: 1;
     min-width: 0;
-    padding: 4px 0;
+    padding: 3px 4px !important;
     display: flex;
     align-items: center;
+    gap: 2px;
     text-align: left;
-    color: #6ca2ff !important;
+    border-radius: var(--zl-radius-sm);
+    color: var(--zl-label-secondary) !important;
+    font-size: var(--zl-text-body);
+    font-weight: 600;
+    &:hover {
+      color: var(--zl-label) !important;
+    }
+    svg {
+      flex-shrink: 0;
+      transition: transform var(--zl-duration) var(--zl-ease-out);
+    }
     span {
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
     }
   }
+  &__count {
+    margin-left: 4px;
+    color: var(--zl-label-tertiary);
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+    flex-shrink: 0;
+  }
   &__add {
     display: flex;
     align-items: center;
+    gap: 2px;
     flex: 0 0 auto;
-    padding: 4px 0;
-    color: #6ca2ff !important;
-    font-size: 13px !important;
+    padding: 3px 6px !important;
+    border-radius: var(--zl-radius-sm);
+    color: var(--zl-accent-text) !important;
+    font-size: var(--zl-text-callout) !important;
+    font-weight: 500;
+    &:hover:not(:disabled) {
+      background: var(--zl-accent-tint);
+    }
   }
   &__more {
     display: flex;
@@ -135,47 +222,77 @@
     height: 28px;
     flex: 0 0 28px;
     padding: 4px !important;
-    color: #a5acb9 !important;
+    border-radius: var(--zl-radius-sm);
+    color: var(--zl-label-secondary) !important;
     svg {
       width: 20px !important;
       height: 20px !important;
+    }
+    &:hover {
+      background: var(--zl-hover);
+      color: var(--zl-label) !important;
     }
   }
   &__cards {
     display: flex;
     flex-direction: column;
-    gap: 9px;
-    padding: 5px 0 1px;
+    gap: 6px;
+    padding: 6px 0 1px;
+    animation: zl-fade-in var(--zl-duration) var(--zl-ease);
   }
   &__empty {
-    color: #7f899c;
-    font-size: 12px;
-    margin: 8px 12px 12px;
+    color: var(--zl-label-tertiary);
+    font-size: var(--zl-text-callout);
+    margin: 6px 10px 10px;
   }
 }
+
 .account-card {
-  cursor: grab;
-  &.is-dragging {
-    opacity: 0.5;
-  }
-  &.drop-before {
-    box-shadow: 0 -3px #579dff;
-  }
-  &.drop-after {
-    box-shadow: 0 3px #579dff;
-  }
   position: relative;
-  border: 1px solid #353c49;
-  border-radius: 8px;
+  border-radius: var(--zl-radius-lg);
   min-height: 86px;
-  background: #15181f;
-  &.is-active {
-    border-color: #2876ff;
-    box-shadow: inset 0 0 0 1px #2876ff;
-  }
+  background: var(--zl-bg-elevated);
+  box-shadow:
+    0 0 0 1px var(--zl-separator),
+    var(--zl-shadow-card);
+  transition:
+    background-color var(--zl-duration-fast) var(--zl-ease),
+    box-shadow var(--zl-duration-fast) var(--zl-ease),
+    opacity var(--zl-duration) var(--zl-ease),
+    transform var(--zl-duration) var(--zl-ease-out);
+
   &:hover {
-    background: #1c212a;
+    background: color-mix(in srgb, var(--zl-bg-elevated) 94%, var(--zl-label));
   }
+  &.is-active {
+    background: var(--zl-accent-tint);
+    box-shadow:
+      0 0 0 1.5px var(--zl-accent),
+      var(--zl-shadow-card);
+  }
+  &.is-dragging {
+    opacity: 0.45;
+    transform: scale(0.98);
+  }
+  // Insertion indicator: an accent line with a leading dot, as in Finder.
+  &.drop-before::before,
+  &.drop-after::before {
+    content: '';
+    position: absolute;
+    left: 6px;
+    right: 6px;
+    height: 3px;
+    border-radius: 2px;
+    background: var(--zl-accent);
+    pointer-events: none;
+  }
+  &.drop-before::before {
+    top: -5px;
+  }
+  &.drop-after::before {
+    bottom: -5px;
+  }
+
   &__select {
     width: 100%;
     min-height: 61px;
@@ -184,6 +301,7 @@
     align-items: center;
     gap: 10px;
     text-align: left;
+    border-radius: var(--zl-radius-lg) var(--zl-radius-lg) 0 0;
   }
   &__portrait {
     position: relative;
@@ -197,33 +315,39 @@
       border-radius: 50%;
       object-fit: cover;
     }
+    img {
+      box-shadow: 0 0 0 0.5px var(--zl-separator);
+    }
   }
+  // Monogram placeholder, like Contacts.
   &__initial {
     display: flex;
     align-items: center;
     justify-content: center;
-    background: #344561;
-    color: #dfebff;
+    background: linear-gradient(180deg, #a5abb7, #858a95);
+    color: #ffffff;
     font-weight: 600;
-    font-size: 21px;
+    font-size: 19px;
   }
   &__identity {
     display: flex;
     flex-direction: column;
     min-width: 0;
     flex: 1;
-    gap: 3px;
+    gap: 2px;
   }
   &__name {
-    color: #f2f5fb;
+    color: var(--zl-label);
     font-size: 14px;
+    font-weight: 600;
     text-overflow: ellipsis;
     overflow: hidden;
     white-space: nowrap;
   }
   &__phone {
-    font-size: 14px;
-    color: #a0acc0;
+    font-size: var(--zl-text-callout);
+    color: var(--zl-label-secondary);
+    font-variant-numeric: tabular-nums;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -238,16 +362,21 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    color: #a1adbf !important;
+    border-radius: var(--zl-radius-sm);
+    color: var(--zl-label-secondary) !important;
     svg {
       width: 20px !important;
       height: 20px !important;
+    }
+    &:hover {
+      background: var(--zl-hover);
+      color: var(--zl-label) !important;
     }
   }
   &__sleep {
     position: absolute;
     right: 34px;
-    top: 5px;
+    top: 4px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -255,18 +384,22 @@
     height: 26px;
     padding: 2px !important;
     border-radius: 50%;
-    color: #a1adbf !important;
+    color: var(--zl-label-secondary) !important;
     svg {
       width: 20px !important;
       height: 20px !important;
     }
     &:hover {
-      background: #303b4c;
-      color: #fff !important;
+      background: var(--zl-hover);
+      color: var(--zl-label) !important;
     }
     &.is-sleeping {
-      background: #3b321c;
-      color: #f5c65e !important;
+      background: color-mix(in srgb, var(--zl-yellow) 22%, transparent);
+      color: color-mix(
+        in srgb,
+        var(--zl-yellow) 70%,
+        var(--zl-label)
+      ) !important;
     }
   }
   &__remark {
@@ -274,46 +407,63 @@
     align-items: center;
     gap: 4px;
     margin: 0 8px 7px 62px;
-    padding: 0 !important;
+    padding: 1px 4px !important;
     max-width: calc(100% - 72px);
     text-align: left;
-    font-size: 13px !important;
-    color: #d1dae9 !important;
+    border-radius: var(--zl-radius-xs);
+    font-size: var(--zl-text-callout) !important;
+    color: var(--zl-label-secondary) !important;
+    &:hover {
+      background: var(--zl-hover);
+      color: var(--zl-label) !important;
+    }
     span {
       text-overflow: ellipsis;
       white-space: nowrap;
       overflow: hidden;
     }
+    &.is-empty span {
+      color: var(--zl-label-tertiary);
+    }
   }
+  // Confirmed: red digits, transparent background, 20px / 800.
   &__unread {
     background: transparent;
-    color: #e53935;
+    color: var(--zl-unread);
     font-size: 20px;
     font-weight: 800;
     line-height: 1.2;
     padding: 2px 5px;
+    font-variant-numeric: tabular-nums;
   }
 }
+
+// Presence indicator. The ring matches the card so the dot reads as a cut-out.
 .account-status {
   position: absolute;
   width: 12px;
   height: 12px;
   bottom: -1px;
   right: -2px;
-  border: 2px solid #f4f6fb;
+  border: 2px solid var(--zl-bg-elevated);
   border-radius: 50%;
-  background: #e3a623;
+  background: var(--zl-yellow);
+  transition: background-color var(--zl-duration) var(--zl-ease);
   &--online {
-    background: #18c568;
+    background: var(--zl-green);
   }
   &--logged-out {
-    background: #f05259;
+    background: var(--zl-red);
   }
   &--error,
   &--loading {
-    background: #edb136;
+    background: var(--zl-yellow);
   }
 }
+.account-card.is-active .account-status {
+  border-color: color-mix(in srgb, var(--zl-bg-elevated) 82%, var(--zl-accent));
+}
+
 // The upstream div reset otherwise stretches MUI's invisible focus sentinels
 // over the backdrop, swallowing outside clicks instead of dismissing the menu.
 .account-context-menu {
@@ -322,30 +472,44 @@
     height: 0;
   }
 }
+// Native context menu: translucent material, compact rows, accent highlight.
 .account-context-menu .MuiPaper-root {
   height: auto;
   svg path {
     fill: currentColor;
   }
-  background: #272b32;
-  color: #f5f6f8;
   min-width: 168px;
-  border: 1px solid #444b57;
-  border-radius: 8px;
   .MuiMenuItem-root {
     display: flex;
-    gap: 10px;
-    padding: 8px 13px;
-    font-size: 14px;
-    min-height: 35px;
-    &:hover {
-      background: #3a414d;
+    gap: 9px;
+    padding: 5px 10px;
+    font-size: var(--zl-text-body);
+    min-height: 28px;
+    svg {
+      opacity: 0.8;
     }
+    &:hover svg,
+    &.Mui-focusVisible svg {
+      opacity: 1;
+    }
+  }
+  .MuiMenuItem-root.is-destructive {
+    color: var(--zl-red);
+    &:hover,
+    &.Mui-focusVisible {
+      background: var(--zl-red);
+      color: #fff;
+    }
+  }
+  .MuiDivider-root {
+    margin: 4px 6px;
+    border-color: var(--zl-separator);
   }
 }
 .account-dialog-error {
-  color: #d32f2f;
-  font-size: 13px;
+  color: var(--zl-danger-text);
+  font-size: var(--zl-text-callout);
+  margin-top: 8px;
 }
 // MUI focus-trap sentinels must not inherit the upstream div height:100%.
 // Otherwise the first invisible sentinel moves the dialog below the viewport.
@@ -361,6 +525,11 @@
   [data-testid='sentinelEnd'] {
     height: 0;
   }
+  p {
+    font-size: var(--zl-text-body);
+    line-height: 1.5;
+    color: var(--zl-label-secondary);
+  }
 }
 @media (max-width: 800px) {
   .account-sidebar {
@@ -372,7 +541,8 @@
 .account-sidebar__header {
   display: flex;
   flex: 0 0 40px;
-  gap: 4px;
+  align-items: center;
+  gap: 6px;
   .account-sidebar__new-group {
     flex: 1;
     min-width: 0;
@@ -386,14 +556,21 @@
   height: 40px;
   flex: 0 0 36px;
   padding: 4px !important;
-  border: 1px solid #586373 !important;
-  border-radius: 6px;
+  border: 1px solid var(--zl-border-control) !important;
+  border-radius: var(--zl-radius-md) !important;
+  background: var(--zl-bg-control) !important;
+  color: var(--zl-label-secondary) !important;
   svg {
     width: 24px !important;
     height: 24px !important;
   }
   &:hover {
-    background: #252a34;
+    color: var(--zl-label) !important;
+    background: color-mix(
+      in srgb,
+      var(--zl-bg-control) 92%,
+      var(--zl-label)
+    ) !important;
   }
 }
 .account-sidebar.is-collapsed {
@@ -416,11 +593,15 @@
   .account-sidebar__footer span {
     display: none;
   }
+  .account-sidebar__groups {
+    margin: 0;
+    padding-inline: 0;
+  }
   .account-group {
-    margin-top: 5px;
+    margin-top: 6px;
   }
   .account-group__cards {
-    gap: 7px;
+    gap: 6px;
     padding: 0;
   }
   .account-card {
@@ -453,27 +634,29 @@
     width: 300px;
     max-width: calc(100vw - 16px);
     margin-top: 4px;
+    animation: zl-pop-in var(--zl-duration) var(--zl-ease-out);
   }
   .MuiDialogTitle-root {
     padding: 10px 12px 2px;
-    font-size: 14px;
+    font-size: var(--zl-text-headline);
+    font-weight: 600;
     line-height: 20px;
   }
   .MuiDialogContent-root {
     padding: 4px 12px 0;
   }
   .MuiFormHelperText-root {
-    font-size: 10px;
+    font-size: var(--zl-text-footnote);
     line-height: 14px;
     margin: 3px 0 0;
   }
   .MuiDialogActions-root {
-    padding: 5px 8px 8px;
+    padding: 6px 8px 8px;
   }
   .MuiDialogActions-root button {
     min-width: 48px;
     padding: 3px 10px;
-    font-size: 12px;
+    font-size: var(--zl-text-callout);
   }
 }
 
@@ -482,16 +665,18 @@
   min-width: 128px;
   max-width: 128px;
   .MuiMenuItem-root {
-    padding: 8px 10px;
+    padding: 5px 8px;
     gap: 8px;
     white-space: nowrap;
   }
 }
+// Confirmed: group total in red, 20px / 800.
 .account-group__toggle .account-group__unread {
   flex-shrink: 0;
   margin-left: 6px;
-  color: #e53935;
+  color: var(--zl-unread);
   font-size: 20px;
   font-weight: 800;
   line-height: 1.2;
+  font-variant-numeric: tabular-nums;
 }

@@ -138,7 +138,9 @@ button {
 
 html {
   font-size: 62.5%;
-  font-family: 'Open Sans';
+  // ZL-WA: native system typeface (SF / Segoe UI Variable / YaHei UI).
+  font-family: var(--zl-font-text);
+  text-rendering: optimizeLegibility;
 }
 
 body {
@@ -153,7 +155,7 @@ body {
 
 * {
   box-sizing: border-box;
-  font-family: 'Open Sans';
+  font-family: var(--zl-font-text);
   font-size: 1.4rem;
   -webkit-font-smoothing: antialiased;
   -webkit-user-select: none;
@@ -167,7 +169,9 @@ div {
   box-sizing: border-box;
 }
 
-*:focus {
+// Hide the focus outline for pointer interaction only; keyboard focus keeps
+// the accent focus ring defined in zl-design.scss.
+*:focus:not(:focus-visible) {
   outline: none;
 }
 img {

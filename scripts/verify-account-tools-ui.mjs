@@ -446,7 +446,7 @@ try {
     console.log(
       'PASS visible group/remark dialogs accept native mouse and text input and persist changes',
     );
-    await clickText('译翻译');
+    await clickText('翻译');
     await wait(
       `!!document.querySelector('.account-tools-panel fieldset')`,
       'translation panel',
@@ -1240,7 +1240,7 @@ try {
       'PASS switching chats invalidates pending outgoing translation',
     );
 
-    await clickText('▤代理');
+    await clickText('代理');
     await wait(
       `!!document.querySelector('.account-tools-panel fieldset')`,
       'proxy panel',
@@ -1306,7 +1306,7 @@ try {
       `!${service(first)}.isLoading && ${service(first)}.accountSnapshot.status==='online' && !${service(second)}.isLoading && ${service(second)}.accountSnapshot.status==='online'`,
       'local fixture Sessions remain online',
     );
-    await clickText('☷群发');
+    await clickText('群发');
     const checkBulkLayout = async () => {
       for (const [width, height] of [
         [1920, 1080],
@@ -1548,7 +1548,7 @@ try {
       `(()=>{const n=document.querySelector('#bulk-failure');Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value').set.call(n,'continue');n.dispatchEvent(new Event('change',{bubbles:true}));const t=document.querySelector('#bulk-min');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(t,'4.5');t.dispatchEvent(new Event('input',{bubbles:true}));})()`,
     );
     await clickText('关闭');
-    await clickText('☷群发');
+    await clickText('群发');
     await clickText('新建转发');
     await wait(
       `document.querySelector('#bulk-failure')?.value==='continue' && document.querySelector('#bulk-min')?.value==='4.5'`,

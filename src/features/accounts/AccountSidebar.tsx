@@ -5,6 +5,7 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
+  Divider,
   Menu,
   MenuItem,
   Popover,
@@ -31,7 +32,7 @@ import {
 } from '@mdi/js';
 import { observer } from 'mobx-react';
 import { runInAction } from 'mobx';
-import { Component, type DragEvent } from 'react';
+import { Component, type DragEvent, type KeyboardEvent } from 'react';
 import type { StoresProps } from '../../@types/ferdium-components.types';
 import Icon from '../../components/ui/icon';
 import workspaceActions from '../workspaces/actions';
@@ -68,6 +69,8 @@ interface State {
   } | null;
   menu: { id: string; anchor: HTMLElement; group?: boolean } | null;
   notice: string;
+  /** Informational notices dismiss themselves; errors stay until closed. */
+  noticeTone: 'info' | 'error';
   busy: boolean;
   dragging: string;
   drop: { id: string; after: boolean } | null;
@@ -97,6 +100,7 @@ export default class AccountSidebar extends Component<StoresProps, State> {
       dialog: null,
       menu: null,
       notice: '',
+      noticeTone: 'info',
       busy: false,
       dragging: '',
       drop: null,
@@ -104,6 +108,80 @@ export default class AccountSidebar extends Component<StoresProps, State> {
   }
 
   private suppressSelectUntil = 0;
+
+  private noticeTimer: ReturnType<typeof setTimeout> | undefined;
+
+  /** How long an informational notice stays visible (like a HUD). */
+  static readonly INFO_NOTICE_MS = 4000;
+
+  componentWillUnmount(): void {
+    clearTimeout(this.noticeTimer);
+  }
+
+  showNotice = (notice: string, tone: 'info' | 'error' = 'info'): void => {
+    clearTimeout(this.noticeTimer);
+    this.setState({ notice, noticeTone: tone });
+    if (notice && tone === 'info') {
+      this.noticeTimer = setTimeout(() => {
+        if (this.state.notice === notice) this.setState({ notice: '' });
+      }, AccountSidebar.INFO_NOTICE_MS);
+    }
+  };
+
+  /**
+   * Saves a lightweight view preference (folding) without the busy state, so
+   * the UI responds immediately instead of briefly disabling every control.
+   */
+  persistQuietly = (config: AccountSidebarConfig): void => {
+    this.save(config).catch(error =>
+      this.showNotice(
+        error instanceof Error ? error.message : String(error),
+        'error',
+      ),
+    );
+  };
+
+  /**
+   * Source-list keyboard navigation: ↑/↓ move between group headers and
+   * accounts, Home/End jump to the ends. Focus never leaves the sidebar.
+   */
+  navigate = (event: KeyboardEvent<HTMLElement>): void => {
+    if (
+      !['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key) ||
+      event.altKey ||
+      event.ctrlKey ||
+      event.metaKey
+    )
+      return;
+    const items = [
+      ...event.currentTarget.querySelectorAll<HTMLElement>(
+        '.account-group__toggle, .account-card__select',
+      ),
+    ].filter(item => item.offsetParent !== null);
+    if (items.length === 0) return;
+    const current = items.indexOf(document.activeElement as HTMLElement);
+    let next: number;
+    switch (event.key) {
+      case 'Home': {
+        next = 0;
+        break;
+      }
+      case 'End': {
+        next = items.length - 1;
+        break;
+      }
+      case 'ArrowUp': {
+        next = current <= 0 ? 0 : current - 1;
+        break;
+      }
+      default: {
+        next = current < 0 ? 0 : Math.min(items.length - 1, current + 1);
+      }
+    }
+    event.preventDefault();
+    items[next].focus();
+    items[next].scrollIntoView({ block: 'nearest' });
+  };
 
   private draggedAccount = '';
 
@@ -155,13 +233,15 @@ export default class AccountSidebar extends Component<StoresProps, State> {
   };
 
   perform = async (operation: () => Promise<void>): Promise<void> => {
+    clearTimeout(this.noticeTimer);
     this.setState({ busy: true, notice: '', menu: null });
     try {
       await operation();
     } catch (error) {
-      this.setState({
-        notice: error instanceof Error ? error.message : String(error),
-      });
+      this.showNotice(
+        error instanceof Error ? error.message : String(error),
+        'error',
+      );
     } finally {
       this.setState({ busy: false });
     }
@@ -329,7 +409,7 @@ export default class AccountSidebar extends Component<StoresProps, State> {
       if (delta === undefined)
         await view.executeJavaScript('window.scrollTo(0, 0)');
       await this.save(updateAccount(this.config, service.id, { zoom }));
-      this.setState({ notice: `会话缩放已设置为 ${Math.round(zoom * 100)}%` });
+      this.showNotice(`会话缩放已设置为 ${Math.round(zoom * 100)}%`);
     });
   };
 
@@ -340,11 +420,12 @@ export default class AccountSidebar extends Component<StoresProps, State> {
       const result = await (
         service.webview as unknown as Electron.WebviewTag
       ).executeJavaScript(`(${markAllWhatsAppRead.toString()})()`);
-      this.setState({
-        notice: result.failed
-          ? `已标记 ${result.read} 个聊天，${result.failed} 个失败，请稍后重试`
-          : `已将 ${result.read} 个未读聊天标记为已读`,
-      });
+      if (result.failed)
+        this.showNotice(
+          `已标记 ${result.read} 个聊天，${result.failed} 个失败，请稍后重试`,
+          'error',
+        );
+      else this.showNotice(`已将 ${result.read} 个未读聊天标记为已读`);
     });
   };
 
@@ -405,7 +486,8 @@ export default class AccountSidebar extends Component<StoresProps, State> {
           type="button"
           className="account-card__select"
           onClick={() => this.select(service)}
-          aria-label={`打开 ${name}`}
+          aria-current={service.isActive ? 'page' : undefined}
+          aria-label={`打开 ${name}${unread > 0 ? `，${unread} 条未读` : ''}`}
           title={`${name}${profile.phone ? ` · ${profile.phone}` : ''}`}
         >
           <span className="account-card__portrait">
@@ -432,14 +514,14 @@ export default class AccountSidebar extends Component<StoresProps, State> {
             </span>
           </span>
           {unread > 0 && (
-            <span className="account-card__unread">
+            <span className="account-card__unread" aria-hidden="true">
               {unread > 99 ? '99+' : unread}
             </span>
           )}
         </button>
         <button
           type="button"
-          className="account-card__remark"
+          className={`account-card__remark ${prefs.remark ? '' : 'is-empty'}`}
           onClick={() =>
             this.config.collapsed
               ? this.select(service)
@@ -497,8 +579,14 @@ export default class AccountSidebar extends Component<StoresProps, State> {
       icon: string,
       action: () => void,
       disabled = false,
+      destructive = false,
     ) => (
-      <MenuItem key={label} disabled={busy || disabled} onClick={action}>
+      <MenuItem
+        key={label}
+        disabled={busy || disabled}
+        onClick={action}
+        className={destructive ? 'is-destructive' : undefined}
+      >
         <Icon icon={icon} size={0.8} />
         <span>{label}</span>
       </MenuItem>
@@ -562,8 +650,13 @@ export default class AccountSidebar extends Component<StoresProps, State> {
                   this.config.accounts[service.id]?.nickname ?? '',
                 ),
               ),
-              item('删除会话', mdiDeleteOutline, () =>
-                this.openDialog('delete', service.id),
+              <Divider key="destructive-divider" />,
+              item(
+                '删除会话',
+                mdiDeleteOutline,
+                () => this.openDialog('delete', service.id),
+                false,
+                true,
               ),
             ]
           : group
@@ -580,11 +673,13 @@ export default class AccountSidebar extends Component<StoresProps, State> {
                   () => this.openDialog('rename-group', group.id, group.name),
                   group.id === DEFAULT_GROUP_ID,
                 ),
+                <Divider key="destructive-divider" />,
                 item(
                   '删除分组',
                   mdiDeleteOutline,
                   () => this.openDialog('delete-group', group.id),
                   group.id === DEFAULT_GROUP_ID,
+                  true,
                 ),
               ]
             : null}
@@ -660,8 +755,11 @@ export default class AccountSidebar extends Component<StoresProps, State> {
         </DialogContent>
         <DialogActions>
           <Button
+            variant="outlined"
             onClick={() => this.setState({ dialog: null })}
             disabled={busy}
+            // For destructive confirmations the safe choice is the default.
+            autoFocus={confirming}
           >
             取消
           </Button>
@@ -730,9 +828,7 @@ export default class AccountSidebar extends Component<StoresProps, State> {
             aria-expanded={!config.collapsed}
             disabled={this.state.busy}
             onClick={() =>
-              this.perform(() =>
-                this.save({ ...config, collapsed: !config.collapsed }),
-              )
+              this.persistQuietly({ ...config, collapsed: !config.collapsed })
             }
           >
             <Icon
@@ -744,18 +840,22 @@ export default class AccountSidebar extends Component<StoresProps, State> {
           </button>
         </div>
         {this.state.notice && !this.state.dialog && (
-          <div className="account-sidebar__notice" role="status">
+          <div
+            className={`account-sidebar__notice ${this.state.noticeTone === 'error' ? 'is-error' : ''}`}
+            role={this.state.noticeTone === 'error' ? 'alert' : 'status'}
+          >
             {this.state.notice}
             <button
               type="button"
-              onClick={() => this.setState({ notice: '' })}
+              onClick={() => this.showNotice('')}
               aria-label="关闭提示"
             >
               ×
             </button>
           </div>
         )}
-        <div className="account-sidebar__groups">
+        {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions */}
+        <div className="account-sidebar__groups" onKeyDown={this.navigate}>
           {config.groups.map(group => {
             const groupAccounts = services.all.filter(
               service =>
@@ -784,25 +884,27 @@ export default class AccountSidebar extends Component<StoresProps, State> {
                     type="button"
                     className="account-group__toggle"
                     aria-expanded={!group.collapsed}
-                    onClick={() => {
-                      this.perform(() =>
-                        this.save({
-                          ...config,
-                          groups: config.groups.map(g =>
-                            g.id === group.id
-                              ? { ...g, collapsed: !g.collapsed }
-                              : g,
-                          ),
-                        }),
-                      );
-                    }}
+                    onClick={() =>
+                      this.persistQuietly({
+                        ...config,
+                        groups: config.groups.map(g =>
+                          g.id === group.id
+                            ? { ...g, collapsed: !g.collapsed }
+                            : g,
+                        ),
+                      })
+                    }
                   >
                     <Icon
                       icon={group.collapsed ? mdiChevronRight : mdiChevronDown}
                       size={0.7}
                     />
-                    <span>
-                      {group.name}（{accounts.length}）
+                    <span>{group.name}</span>
+                    <span
+                      className="account-group__count"
+                      aria-label={`${accounts.length} 个会话`}
+                    >
+                      {accounts.length}
                     </span>
                     {unreadTotal > 0 && (
                       <span

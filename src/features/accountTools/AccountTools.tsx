@@ -3,6 +3,10 @@ import {
   mdiAccountGroupOutline,
   mdiAccountMultiplePlusOutline,
   mdiAccountMultipleMinusOutline,
+  mdiCardAccountDetailsOutline,
+  mdiSendOutline,
+  mdiShieldLockOutline,
+  mdiTranslate,
 } from '@mdi/js';
 import { ipcRenderer, clipboard } from 'electron';
 import { observer } from 'mobx-react';
@@ -98,6 +102,14 @@ function Switch({
       />
       <span aria-hidden="true" />
     </label>
+  );
+}
+/** One consistent symbol set for the tool rail (filled 24-unit glyphs). */
+function RailIcon({ path }: { path: string }) {
+  return (
+    <svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true">
+      <path d={path} />
+    </svg>
   );
 }
 const SettingsPanel = observer(
@@ -632,7 +644,24 @@ const AccountTools = observer(({ stores }: StoresProps) => {
   const { active } = stores.services;
   const service = active?.recipe.id === 'whatsapp' ? active : undefined;
   return (
-    <aside className="account-tools" aria-label="账号工具">
+    // eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions
+    <aside
+      className="account-tools"
+      aria-label="账号工具"
+      onKeyDown={event => {
+        // Esc dismisses the inspector panel, as in native apps. Fields keep
+        // their own Esc behaviour (e.g. cancelling an IME composition).
+        if (
+          event.key === 'Escape' &&
+          panel &&
+          !event.nativeEvent.isComposing &&
+          !event.defaultPrevented
+        ) {
+          event.preventDefault();
+          setPanel('');
+        }
+      }}
+    >
       {panel === 'customer' && (
         <CustomerPanel
           runtime={customers}
@@ -648,61 +677,52 @@ const AccountTools = observer(({ stores }: StoresProps) => {
           textColor={stores.settings.app.translationTextColor}
         />
       )}
-      <nav className="account-tools-rail">
-        <button
-          type="button"
-          title="客户资料"
-          aria-pressed={panel === 'customer'}
-          onClick={() => setPanel(panel === 'customer' ? '' : 'customer')}
-        >
-          <svg
-            width="26"
-            height="26"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.6"
-            aria-hidden="true"
+      <nav className="account-tools-rail" aria-label="账号工具栏">
+        {(
+          [
+            ['customer', '客户', '客户资料', mdiCardAccountDetailsOutline],
+            ['proxy', '代理', '账号代理', mdiShieldLockOutline],
+            ['translation', '翻译', '收发翻译', mdiTranslate],
+          ] as const
+        ).map(([id, label, title, icon]) => (
+          <button
+            type="button"
+            key={id}
+            title={title}
+            aria-pressed={panel === id}
+            onClick={() => setPanel(panel === id ? '' : id)}
           >
-            <circle cx="9" cy="7" r="3" />
-            <path d="M3 20v-3a6 6 0 0 1 12 0v3M17 5h5M17 10h5M18 15h4M18 20h4" />
-          </svg>
-          <span>客户</span>
-        </button>
+            <RailIcon path={icon} />
+            <span>{label}</span>
+          </button>
+        ))}
+        <hr className="account-tools-rail__separator" />
         <button
           type="button"
-          aria-pressed={panel === 'proxy'}
-          onClick={() => setPanel(panel === 'proxy' ? '' : 'proxy')}
+          title="批量发送"
+          aria-haspopup="dialog"
+          onClick={() => setBulk(true)}
         >
-          ▤<span>代理</span>
-        </button>
-        <button
-          type="button"
-          aria-pressed={panel === 'translation'}
-          onClick={() => setPanel(panel === 'translation' ? '' : 'translation')}
-        >
-          译<span>翻译</span>
-        </button>
-        <button type="button" onClick={() => setBulk(true)}>
-          ☷<span>群发</span>
+          <RailIcon path={mdiSendOutline} />
+          <span>群发</span>
         </button>
         {(
           [
-            ['speech', '群组', mdiAccountGroupOutline],
-            ['join', '进群', mdiAccountMultiplePlusOutline],
-            ['leave', '退群', mdiAccountMultipleMinusOutline],
+            ['speech', '群组', '群组发言管理', mdiAccountGroupOutline],
+            ['join', '进群', '批量进群', mdiAccountMultiplePlusOutline],
+            ['leave', '退群', '批量退群', mdiAccountMultipleMinusOutline],
           ] as const
-        ).map(([mode, label, icon]) => (
+        ).map(([mode, label, title, icon]) => (
           <button
             type="button"
             key={mode}
+            title={title}
             aria-label={label}
+            aria-haspopup="dialog"
             aria-pressed={groupMode === mode}
             onClick={() => setGroupMode(mode)}
           >
-            <svg width="26" height="26" viewBox="0 0 24 24" aria-hidden="true">
-              <path d={icon} />
-            </svg>
+            <RailIcon path={icon} />
             <span>{label}</span>
           </button>
         ))}

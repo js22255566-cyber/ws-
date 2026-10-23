@@ -7,7 +7,8 @@ import { defineMessages } from 'react-intl';
 import { shiftKey } from './environment';
 import type { AccountSidebarConfig } from './features/accounts/state';
 
-export const DEFAULT_ACCENT_COLOR = '#7367F0';
+// ZL-WA: Apple system blue (upstream Ferdium used #7367F0).
+export const DEFAULT_ACCENT_COLOR = '#007AFF';
 
 export const CHECK_INTERVAL = ms('1h'); // How often should we perform checks
 
