@@ -57,6 +57,8 @@ export default class Service {
   // ZL-WA: last confirmed identity, with session status from live observations.
   @observable accountSnapshot: AccountSnapshot = { status: 'loading' };
 
+  accountUnreadLive = false;
+
   @observable name: string = '';
 
   @observable unreadDirectMessageCount: number = 0;

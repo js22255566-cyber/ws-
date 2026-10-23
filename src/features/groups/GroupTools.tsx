@@ -619,8 +619,9 @@ export default observer(function GroupTools({
               刷新执行结果
             </Button>
             <p>
-              逐个执行并核验，每项最多自动执行 3
-              次。等待管理员审批的进群申请单独显示。
+              {mode === 'join'
+                ? '全部群先执行一次，首轮结束后再将确认未加入的失败项重试一次。等待管理员审批的申请不重复提交。'
+                : '逐个执行并核验，每项最多自动执行 3 次。'}
             </p>
             {batch && (
               <label htmlFor={`${uid}-history`}>
@@ -645,9 +646,17 @@ export default observer(function GroupTools({
             )}
             {batch && (
               <>
-                <div className="group-tools-counts">
+                <div
+                  className={`group-tools-counts ${mode === 'join' ? 'has-approval' : ''}`}
+                >
                   {(
-                    ['success', 'failed', 'uncertain', 'approval'] as const
+                    (mode === 'join'
+                      ? ['success', 'failed', 'uncertain', 'approval']
+                      : [
+                          'success',
+                          'failed',
+                          'uncertain',
+                        ]) as (keyof typeof statuses)[]
                   ).map(status => (
                     <span key={status} className={`group-tools-${status}`}>
                       {statuses[status]}

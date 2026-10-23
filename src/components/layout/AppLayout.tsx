@@ -84,6 +84,8 @@ interface IProps extends WrappedComponentProps, WithStylesProps<typeof styles> {
   services: React.ReactElement;
   showServicesUpdatedInfoBar: boolean;
   appUpdateIsDownloaded: boolean;
+  updateDownloading?: boolean;
+  updateDownloadProgress?: number;
   authRequestFailed: boolean;
   installAppUpdate: () => void;
   showRequiredRequestsError: boolean;
@@ -210,6 +212,9 @@ class AppLayout extends Component<PropsWithChildren<IProps>, IState> {
                   (this.state.shouldShowAppUpdateInfoBar ||
                     this.state.dismissedUpdateVersion !== updateVersion) && (
                     <AppUpdateInfoBar
+                      downloaded={appUpdateIsDownloaded}
+                      downloading={this.props.updateDownloading}
+                      progress={this.props.updateDownloadProgress}
                       onInstallUpdate={installAppUpdate}
                       updateVersionParsed={updateVersionParse(updateVersion)}
                       onHide={() => {

@@ -105,6 +105,10 @@ if (isWindows) {
 
 // Initialize Settings
 const settings = new Settings('app', DEFAULT_APP_SETTINGS);
+// Reset the former opt-out default once; later explicit user choices persist.
+if (!settings.get('telemetryDefaultOffApplied')) {
+  settings.set({ sentry: false, telemetryDefaultOffApplied: true });
+}
 const proxySettings = new Settings('proxy');
 const shortcutSettings = new Settings('shortcuts', DEFAULT_SHORTCUTS);
 

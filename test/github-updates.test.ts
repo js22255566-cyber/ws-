@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import GitHubUpdates from '../src/electron/GitHubUpdates';
@@ -17,16 +17,9 @@ describe('ZL-WA GitHub release notifier', () => {
   let fetcher: jest.Mock;
   let notify: jest.Mock;
   let updater: GitHubUpdates;
-  let secure: boolean;
-  const secrets = {
-    available: () => secure,
-    encrypt: (text: string) => Buffer.from(text).toString('base64'),
-    decrypt: (text: string) => Buffer.from(text, 'base64').toString(),
-  };
   beforeEach(() => {
     root = mkdtempSync(join(tmpdir(), 'zl-github-'));
     path = join(root, 'updates.json');
-    secure = true;
     notify = jest.fn();
     fetcher = jest
       .fn()
@@ -35,8 +28,9 @@ describe('ZL-WA GitHub release notifier', () => {
       );
     updater = new GitHubUpdates({
       version: '7.2.5',
-      path,
-      secrets,
+      directory: root,
+      supported: true,
+      launch: jest.fn(async () => {}),
       fetch: fetcher,
       notify,
     });
@@ -110,30 +104,10 @@ describe('ZL-WA GitHub release notifier', () => {
     );
     expect(updater.state.error).toBeDefined();
   });
-  it('stores optional user credentials encrypted and clears them without returning the token', async () => {
-    const token = 'github_pat_fake_123456789';
-    expect(updater.saveToken(token)).toEqual({
-      hasToken: true,
-      releasesUrl: RELEASES_URL,
-    });
-    expect(readFileSync(path, 'utf8')).not.toContain(token);
-    const restored = new GitHubUpdates({
-      version: '7.2.5',
-      path,
-      secrets,
-      fetch: fetcher,
-      notify,
-    });
-    expect(restored.configuration().hasToken).toBe(true);
-    await restored.check(false);
-    expect(fetcher.mock.calls[0][1].headers.Authorization).toBe(
-      `Bearer ${token}`,
-    );
-    restored.saveToken(null);
-    expect(restored.configuration().hasToken).toBe(false);
-    secure = false;
-    expect(() => restored.saveToken(token)).toThrow('安全存储');
-    expect(() => restored.saveToken('bad token')).toThrow('有效');
+  it('uses public release endpoints without reading legacy credentials', async () => {
+    writeFileSync(path, 'invalid legacy credential file');
+    await updater.check(false);
+    expect(fetcher.mock.calls[0][1].headers.Authorization).toBeUndefined();
   });
   it('reads additional release pages and rejects empty release data', async () => {
     fetcher

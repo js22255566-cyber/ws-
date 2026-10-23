@@ -1,4 +1,4 @@
-/* eslint-disable no-console -- CLI integration test output. */
+/* eslint-disable no-console -- Standalone Electron UI regression. */
 import assert from 'node:assert/strict';
 import { writeFileSync } from 'node:fs';
 import {
@@ -15,16 +15,17 @@ const vm = code =>
     `require('@electron/remote').require('node:vm').runInThisContext(${JSON.stringify(code)})`,
   );
 let before;
-let patched = false;
+let installed = false;
 try {
-  await wait(
-    `!!window.ferdium?.stores?.settings.loaded`,
-    'app settings loaded',
-  );
+  await wait('!!window.ferdium?.stores?.settings.loaded', 'settings loaded');
   assert.equal(
     await evaluate('window.ferdium.stores.services.all.some(s=>s.isEnabled)'),
     false,
-    'Use a local profile without enabled real accounts',
+  );
+  assert.equal(
+    await evaluate('window.ferdium.stores.settings.app.sentry'),
+    false,
+    'telemetry defaults off after upgrade',
   );
   before = await evaluate(
     '({automaticUpdates:window.ferdium.stores.settings.app.automaticUpdates,beta:window.ferdium.stores.settings.app.beta})',
@@ -32,124 +33,134 @@ try {
   await evaluate(
     `window.ferdium.stores.settings._update({type:'app',data:{automaticUpdates:false,beta:false}})`,
   );
-  await vm(
-    `globalThis.__zlUpdateOriginalFetch=process.getBuiltinModule('module').createRequire(process.cwd()+'/package.json')('electron').net.fetch;globalThis.__zlUpdateOriginalOpen=process.getBuiltinModule('module').createRequire(process.cwd()+'/package.json')('electron').shell.openExternal;globalThis.__zlUpdateFixture={status:200,version:'7.2.6',calls:[],opened:''};process.getBuiltinModule('module').createRequire(process.cwd()+'/package.json')('electron').net.fetch=async function(url,options){if(String(url).startsWith('https://api.github.com/repos/zhenglin1885-arch/ZL-WA/releases')){globalThis.__zlUpdateFixture.calls.push(String(url));if(globalThis.__zlUpdateFixture.status!==200)return new Response('{}',{status:globalThis.__zlUpdateFixture.status});const v=globalThis.__zlUpdateFixture.version;return new Response(JSON.stringify(String(url).includes('/tags/')?{body:'ZL-WA 本地模拟更新说明'}:[{tag_name:'v'+v,draft:false,prerelease:false,assets:[{name:'ZL-WA-win-AutoSetup-'+v+'-x64.exe',size:100}]}]));}return globalThis.__zlUpdateOriginalFetch.call(this,url,options);};process.getBuiltinModule('module').createRequire(process.cwd()+'/package.json')('electron').shell.openExternal=async url=>{globalThis.__zlUpdateFixture.opened=url;};true`,
+  const windowId = await evaluate(
+    `require('@electron/remote').getCurrentWindow().id`,
   );
-  patched = true;
-  await evaluate(
-    `require('@electron/remote').getCurrentWindow().setSize(1280,900);window.ferdium.stores.router.push('/settings/app')`,
-  );
+  await vm(`(()=>{
+    const require=process.getBuiltinModule('module').createRequire(process.cwd()+'/package.json');
+    const {ipcMain,BrowserWindow}=require('electron');
+    const fs=require('node:fs'),path=require('node:path'),os=require('node:os');
+    const root=fs.mkdtempSync(path.join(os.tmpdir(),'zl-update-ui-'));
+    const channels=['state','check','download','install','notes'].map(c=>'zl-updates-'+c);
+    const handlers=new Map(channels.map(c=>[c,ipcMain._invokeHandlers.get(c)]));
+    const target=BrowserWindow.fromId(${windowId});
+    const bytes=Buffer.from('MZ local synthetic installer');
+    const digest='sha256:'+require('node:crypto').createHash('sha256').update(bytes).digest('hex');
+    const fixture={version:'99.0.1',status:200,corrupt:true,calls:[],launched:'',root,channels,handlers};
+    const GitHubUpdates=require('./build/electron/GitHubUpdates').default;
+    const updater=new GitHubUpdates({version:require('./package.json').version,directory:root,supported:true,
+      launch:async file=>{fixture.launched=file;},
+      notify:state=>target.webContents.send('autoUpdate',state),
+      fetch:async(url,options)=>{
+        fixture.calls.push({url,headers:options.headers});
+        if(url.startsWith('https://api.github.com/')){
+          if(fixture.status!==200)return new Response('{}',{status:fixture.status});
+          return new Response(JSON.stringify(url.includes('/tags/')?{body:'ZL-WA 在线更新说明'}:[{tag_name:'v'+fixture.version,draft:false,prerelease:false,assets:[{name:'ZL-WA-win-AutoSetup-'+fixture.version+'-x64.exe',size:bytes.length,digest}]}]));
+        }
+        if(!url.startsWith('https://github.com/zhenglin1885-arch/ZL-WA/releases/download/'))throw Error('Unexpected download');
+        return new Response(fixture.corrupt?Buffer.alloc(bytes.length):bytes);
+      }});
+    fixture.updater=updater;
+    for(const channel of channels){
+      ipcMain.removeHandler(channel);
+      ipcMain.handle(channel,(event,arg)=>{
+        if(event.sender!==target.webContents||event.senderFrame!==target.webContents.mainFrame)throw Error('Forbidden');
+        if(channel.endsWith('-state'))return updater.state;
+        if(channel.endsWith('-check'))return updater.check(false);
+        if(channel.endsWith('-download'))return updater.download();
+        if(channel.endsWith('-install'))return updater.install();
+        return updater.notes(arg);
+      });
+    }
+    globalThis.__zlUpdatesUI=fixture;
+    return true;
+  })()`);
+  installed = true;
+  await evaluate(`window.ferdium.stores.router.push('/settings/app')`);
   await wait('!!document.querySelector("#updates")', 'settings tabs');
   await click('#updates');
-  await wait(
-    '!!document.querySelector(".zl-updates")',
-    'our GitHub update panel',
-  );
-  const panelText = await evaluate(
-    'document.querySelector(".zl-updates").textContent',
-  );
-  assert(panelText.includes('7.2.5'));
+  await wait('!!document.querySelector(".zl-updates")', 'online updates panel');
   assert.equal(
-    await evaluate('document.querySelector(".zl-updates a").href'),
-    'https://github.com/zhenglin1885-arch/ZL-WA/releases',
+    await evaluate(
+      `document.querySelector('.zl-updates').textContent.includes('Token')`,
+    ),
+    false,
   );
-  await clickText('检查更新');
-  await wait(
-    `document.querySelector('.zl-updates [role=status]')?.textContent.includes('发现新版本 7.2.6')`,
-    'manual check works with automatic updates off',
-  );
-  await wait(
-    `window.ferdium.stores.app.updateStatus==='AVAILABLE'`,
-    'new version reaches global app state',
-  );
-  const bannerText = await evaluate(`document.body.textContent`);
-  assert(bannerText.includes('发现 ZL-WA 新版本'));
-  await clickText('前往 GitHub 下载 7.2.6');
   assert.equal(
-    await vm(`globalThis.__zlUpdateFixture.opened`),
-    'https://github.com/zhenglin1885-arch/ZL-WA/releases/tag/v7.2.6',
+    await evaluate(
+      `!!document.querySelector('#github-update-token,.zl-updates details')`,
+    ),
+    false,
+  );
+  await clickText('检查在线更新');
+  await wait(
+    `document.querySelector('.zl-updates [role=status]').textContent.includes('发现新版本 99.0.1')`,
+    'public installer detected',
+  );
+  await clickText('下载安装更新 99.0.1');
+  await wait(
+    `document.querySelector('.zl-updates [role=status]').textContent.includes('校验失败')`,
+    'corrupt update rejected',
+  );
+  assert.equal(await vm('globalThis.__zlUpdatesUI.launched'), '');
+  await vm('globalThis.__zlUpdatesUI.corrupt=false;true');
+  await clickText('下载安装更新 99.0.1');
+  await wait(
+    `document.querySelector('.zl-updates [role=status]').textContent.includes('下载并校验完成')`,
+    'verified installer ready',
+  );
+  assert.equal(await vm('globalThis.__zlUpdatesUI.launched'), '');
+  assert.equal(
+    await evaluate('window.ferdium.stores.app.updateStatus'),
+    'DOWNLOADED',
   );
   await evaluate(
-    `document.querySelector('.info-bar__cta').closest('.info-bar').querySelector('.info-bar__close').click()`,
+    `[...document.querySelectorAll('.zl-updates button')].find(b=>b.textContent==='退出并安装').click()`,
   );
   await wait(
-    `!document.body.textContent.includes('发现 ZL-WA 新版本')`,
-    'dismiss current version notification',
+    `(async()=>!!require('@electron/remote').require('node:vm').runInThisContext('globalThis.__zlUpdatesUI.launched'))()`,
+    'explicit install launches verified package',
   );
-  await vm("globalThis.__zlUpdateFixture.version='7.2.7';true");
-  await clickText('检查更新');
+  const launched = await vm('globalThis.__zlUpdatesUI.launched');
+  assert(launched.endsWith('ZL-WA-win-AutoSetup-99.0.1-x64.exe'));
+  const requests = await vm('globalThis.__zlUpdatesUI.calls');
+  assert(
+    requests.every(r => !r.headers?.Authorization),
+    'public updates never send credentials',
+  );
+  await vm('globalThis.__zlUpdatesUI.status=404;true');
+  await clickText('检查在线更新');
   await wait(
-    `document.body.textContent.includes('发现 ZL-WA 新版本 7.2.7')`,
-    'a newer version prompts again after dismissal',
-  );
-  await clickText('查看更新说明');
-  await wait(
-    `document.body.textContent.includes('ZL-WA 本地模拟更新说明')`,
-    'release notes use our main-process authenticated feed',
-  );
-  const requests = await vm(`globalThis.__zlUpdateFixture.calls`);
-  assert(requests.some(url => url.endsWith('/tags/v7.2.7')));
-  await evaluate(`window.ferdium.stores.router.push('/settings/app')`);
-  await wait('!!document.querySelector("#updates")', 'return to settings');
-  await click('#updates');
-  await vm('globalThis.__zlUpdateFixture.status=404;true');
-  await clickText('检查更新');
-  await wait(
-    `document.querySelector('.zl-updates [role=status]')?.textContent.includes('无法访问')`,
-    'private repository error shown',
-  );
-  const errorText = await evaluate(
-    `document.querySelector('.zl-updates [role=status]').textContent`,
-  );
-  assert(!errorText.includes('已是当前'));
-  assert.equal(
-    await evaluate(`window.ferdium.stores.app.updateStatus`),
-    'FAILED',
+    `document.querySelector('.zl-updates [role=status]').textContent.includes('未找到发布包')`,
+    'server error not reported as latest',
   );
   await vm(
-    `globalThis.__zlUpdateFixture.status=200;globalThis.__zlUpdateFixture.version='7.2.5';true`,
+    `globalThis.__zlUpdatesUI.status=200;globalThis.__zlUpdatesUI.version='1.0.0';true`,
   );
-  await clickText('检查更新');
+  await clickText('检查在线更新');
   await wait(
-    `document.querySelector('.zl-updates [role=status]')?.textContent.includes('已是当前')`,
-    'retry recovers from error',
-  );
-  assert.equal(
-    await evaluate(`window.ferdium.stores.app.updateStatus`),
-    'NOT_AVAILABLE',
-  );
-  await click('.zl-updates summary');
-  assert.equal(
-    await evaluate(`document.querySelector('#github-update-token').type`),
-    'password',
+    `document.querySelector('.zl-updates [role=status]').textContent.includes('已是当前')`,
+    'retry recovers',
   );
   const shot = await call('Page.captureScreenshot', { format: 'png' });
   writeFileSync(
-    '/workspace/ZL-WA-7.2.5-updates.png',
+    '/workspace/ZL-WA-online-updates.png',
     Buffer.from(shot.data, 'base64'),
   );
   console.log(
-    'PASS version 7.2.5, own GitHub feed, manual checks with auto off, update banner, version download link, private-repo error and successful retry, masked token input',
+    'PASS public online update UI: token section removed, telemetry off, real installer download/hash verification, corrupt rejection, retry, explicit install and global ready status; synthetic installer only',
   );
 } catch (error) {
   console.error(error);
   process.exitCode = 1;
 } finally {
-  if (patched)
-    try {
-      await vm(
-        `process.getBuiltinModule('module').createRequire(process.cwd()+'/package.json')('electron').net.fetch=globalThis.__zlUpdateOriginalFetch;process.getBuiltinModule('module').createRequire(process.cwd()+'/package.json')('electron').shell.openExternal=globalThis.__zlUpdateOriginalOpen;delete globalThis.__zlUpdateOriginalFetch;delete globalThis.__zlUpdateOriginalOpen;delete globalThis.__zlUpdateFixture;true`,
-      );
-    } catch {
-      /* app may have closed */
-    }
+  if (installed)
+    await vm(
+      `(()=>{const f=globalThis.__zlUpdatesUI;const require=process.getBuiltinModule('module').createRequire(process.cwd()+'/package.json');const {ipcMain}=require('electron');for(const c of f.channels){ipcMain.removeHandler(c);const h=f.handlers.get(c);if(h)ipcMain.handle(c,h);}require('node:fs').rmSync(f.root,{recursive:true,force:true});delete globalThis.__zlUpdatesUI;return true;})()`,
+    ).catch(() => {});
   if (before)
-    try {
-      await evaluate(
-        `window.ferdium.stores.settings._update({type:'app',data:${JSON.stringify(before)}});window.ferdium.stores.router.push('/')`,
-      );
-    } catch {
-      /* app may have closed */
-    }
+    await evaluate(
+      `window.ferdium.stores.settings._update({type:'app',data:${JSON.stringify(before)}});window.ferdium.stores.app._resetUpdateStatus();window.ferdium.stores.router.push('/')`,
+    ).catch(() => {});
   socket.close();
 }

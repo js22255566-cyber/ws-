@@ -215,7 +215,7 @@ describe('WhatsApp account adapter', () => {
       },
     };
     const snapshot = await readWhatsAppSnapshot();
-    expect(snapshot.unreadMessages).toBe(10);
+    expect(snapshot.unreadMessages).toBe(11);
   });
 
   it('sends real read receipts only for unread chats and reports partial failures', async () => {

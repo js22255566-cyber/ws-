@@ -113,6 +113,17 @@ window.open = (url, frameName, features): WindowProxy | null => {
 // then overwrite the corresponding field of the window object by injected JS.
 contextBridge.exposeInMainWorld('ferdium', {
   open: window.open,
+  pushWhatsAppUnread: (value: { ownerId: string; count: number }) => {
+    if (
+      process.isMainFrame &&
+      globalThis.location.hostname === 'web.whatsapp.com' &&
+      value &&
+      /^\d{5,30}@(c\.us|lid)$/.test(value.ownerId) &&
+      Number.isSafeInteger(value.count) &&
+      value.count >= 0
+    )
+      ipcRenderer.sendToHost('zl-wa-unread', value);
+  },
   setBadge: (
     direct: string | number | null | undefined,
     indirect: string | number | null | undefined,

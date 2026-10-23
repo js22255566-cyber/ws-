@@ -7,6 +7,7 @@ import {
   DialogTitle,
   Menu,
   MenuItem,
+  Popover,
   TextField,
 } from '@mui/material';
 import {
@@ -59,7 +60,12 @@ type DialogKind =
   | 'rename-group'
   | 'delete-group';
 interface State {
-  dialog: { kind: DialogKind; id: string; value: string } | null;
+  dialog: {
+    kind: DialogKind;
+    id: string;
+    value: string;
+    anchor?: HTMLElement;
+  } | null;
   menu: { id: string; anchor: HTMLElement; group?: boolean } | null;
   notice: string;
   busy: boolean;
@@ -162,7 +168,19 @@ export default class AccountSidebar extends Component<StoresProps, State> {
   };
 
   openDialog = (kind: DialogKind, id = '', value = ''): void => {
-    this.setState({ dialog: { kind, id, value }, menu: null, notice: '' });
+    const anchor =
+      kind === 'remark'
+        ? [
+            ...document.querySelectorAll<HTMLElement>(
+              '.account-card[data-service-id]',
+            ),
+          ].find(card => card.dataset.serviceId === id)
+        : undefined;
+    this.setState({
+      dialog: { kind, id, value, anchor },
+      menu: null,
+      notice: '',
+    });
   };
 
   activate = (serviceId: string): void => {
@@ -348,10 +366,16 @@ export default class AccountSidebar extends Component<StoresProps, State> {
         className={`account-card ${service.isActive ? 'is-active' : ''} ${this.state.dragging === service.id ? 'is-dragging' : ''} ${this.state.drop?.id === service.id ? (this.state.drop.after ? 'drop-after' : 'drop-before') : ''}`}
         data-service-id={service.id}
         onContextMenu={event => {
-          if (!this.config.collapsed) return;
           event.preventDefault();
+          const more = event.currentTarget.querySelector<HTMLElement>(
+            '.account-card__more',
+          );
+          const anchor =
+            more && more.getBoundingClientRect().width > 0
+              ? more
+              : event.currentTarget;
           this.setState({
-            menu: { id: service.id, anchor: event.currentTarget },
+            menu: { id: service.id, anchor },
           });
         }}
         draggable={!this.state.busy}
@@ -442,7 +466,7 @@ export default class AccountSidebar extends Component<StoresProps, State> {
             }
             onClick={() => this.toggleSleep(service)}
           >
-            <Icon icon={mdiWeatherNight} size={0.75} />
+            <Icon icon={mdiWeatherNight} size={1} />
           </button>
         )}
         <button
@@ -484,7 +508,7 @@ export default class AccountSidebar extends Component<StoresProps, State> {
         anchorEl={menu?.anchor}
         open={Boolean(menu)}
         onClose={() => this.setState({ menu: null })}
-        className="account-context-menu"
+        className={`account-context-menu ${menu && !menu.group ? 'account-session-menu' : ''}`}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
         transformOrigin={{ vertical: 'top', horizontal: 'right' }}
       >
@@ -573,91 +597,109 @@ export default class AccountSidebar extends Component<StoresProps, State> {
     if (!dialog) return null;
     const confirming =
       dialog.kind === 'delete' || dialog.kind === 'delete-group';
+    const close = () => {
+      if (!busy) this.setState({ dialog: null });
+    };
+    const content = (
+      <form
+        onSubmit={event => {
+          event.preventDefault();
+          this.submitDialog();
+        }}
+      >
+        <DialogTitle>{dialogTitles[dialog.kind]}</DialogTitle>
+        <DialogContent>
+          {confirming ? (
+            <p>
+              {dialog.kind === 'delete'
+                ? '删除后将移除此会话及其本地登录数据。确定删除吗？'
+                : '分组中的会话将移到默认分组，不会删除账号。确定删除吗？'}
+            </p>
+          ) : (
+            <TextField
+              autoFocus
+              size={dialog.kind === 'remark' ? 'small' : 'medium'}
+              fullWidth
+              margin="dense"
+              label={
+                dialog.kind === 'move' ? '选择分组' : dialogTitles[dialog.kind]
+              }
+              select={dialog.kind === 'move'}
+              SelectProps={{
+                MenuProps: { className: 'account-context-menu' },
+              }}
+              value={dialog.value}
+              onChange={event =>
+                this.setState({
+                  dialog: { ...dialog, value: event.target.value },
+                })
+              }
+              inputProps={{ maxLength: dialog.kind === 'remark' ? 200 : 60 }}
+              helperText={
+                dialog.kind === 'nickname'
+                  ? '仅修改本地显示昵称；留空恢复 WhatsApp 昵称。'
+                  : dialog.kind === 'remark'
+                    ? '留空显示“暂无备注”。'
+                    : undefined
+              }
+            >
+              {dialog.kind === 'move'
+                ? this.config.groups.map(group => (
+                    <MenuItem value={group.id} key={group.id}>
+                      {group.name}
+                    </MenuItem>
+                  ))
+                : null}
+            </TextField>
+          )}
+          {notice && (
+            <p role="alert" className="account-dialog-error">
+              {notice}
+            </p>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button
+            onClick={() => this.setState({ dialog: null })}
+            disabled={busy}
+          >
+            取消
+          </Button>
+          <Button
+            type="submit"
+            variant="contained"
+            color={confirming ? 'error' : 'primary'}
+            disabled={busy}
+          >
+            {confirming ? '删除' : '保存'}
+          </Button>
+        </DialogActions>
+      </form>
+    );
+    if (dialog.kind === 'remark')
+      return (
+        <Popover
+          className="account-dialog account-remark-dialog"
+          open
+          anchorEl={dialog.anchor}
+          anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
+          transformOrigin={{ vertical: 'top', horizontal: 'left' }}
+          marginThreshold={8}
+          onClose={close}
+          slotProps={{ paper: { role: 'dialog', 'aria-label': '编辑备注' } }}
+        >
+          {content}
+        </Popover>
+      );
     return (
       <Dialog
         className="account-dialog"
         open
-        onClose={() => {
-          if (!busy) this.setState({ dialog: null });
-        }}
+        onClose={close}
         fullWidth
         maxWidth="xs"
       >
-        <form
-          onSubmit={event => {
-            event.preventDefault();
-            this.submitDialog();
-          }}
-        >
-          <DialogTitle>{dialogTitles[dialog.kind]}</DialogTitle>
-          <DialogContent>
-            {confirming ? (
-              <p>
-                {dialog.kind === 'delete'
-                  ? '删除后将移除此会话及其本地登录数据。确定删除吗？'
-                  : '分组中的会话将移到默认分组，不会删除账号。确定删除吗？'}
-              </p>
-            ) : (
-              <TextField
-                autoFocus
-                fullWidth
-                margin="dense"
-                label={
-                  dialog.kind === 'move'
-                    ? '选择分组'
-                    : dialogTitles[dialog.kind]
-                }
-                select={dialog.kind === 'move'}
-                SelectProps={{
-                  MenuProps: { className: 'account-context-menu' },
-                }}
-                value={dialog.value}
-                onChange={event =>
-                  this.setState({
-                    dialog: { ...dialog, value: event.target.value },
-                  })
-                }
-                inputProps={{ maxLength: dialog.kind === 'remark' ? 200 : 60 }}
-                helperText={
-                  dialog.kind === 'nickname'
-                    ? '仅修改本地显示昵称；留空恢复 WhatsApp 昵称。'
-                    : dialog.kind === 'remark'
-                      ? '留空显示“暂无备注”。'
-                      : undefined
-                }
-              >
-                {dialog.kind === 'move'
-                  ? this.config.groups.map(group => (
-                      <MenuItem value={group.id} key={group.id}>
-                        {group.name}
-                      </MenuItem>
-                    ))
-                  : null}
-              </TextField>
-            )}
-            {notice && (
-              <p role="alert" className="account-dialog-error">
-                {notice}
-              </p>
-            )}
-          </DialogContent>
-          <DialogActions>
-            <Button
-              onClick={() => this.setState({ dialog: null })}
-              disabled={busy}
-            >
-              取消
-            </Button>
-            <Button
-              type="submit"
-              variant="contained"
-              color={confirming ? 'error' : 'primary'}
-              disabled={busy}
-            >
-              {confirming ? '删除' : '保存'}
-            </Button>
-          </DialogActions>
-        </form>
+        {content}
       </Dialog>
     );
   }
@@ -724,6 +766,13 @@ export default class AccountSidebar extends Component<StoresProps, State> {
               config,
               groupAccounts.map(service => service.id),
             ).map(id => groupAccounts.find(service => service.id === id)!);
+            const unreadTotal = accounts.reduce(
+              (sum, service) =>
+                sum +
+                service.unreadDirectMessageCount +
+                service.unreadIndirectMessageCount,
+              0,
+            );
             return (
               <section
                 key={group.id}
@@ -755,6 +804,14 @@ export default class AccountSidebar extends Component<StoresProps, State> {
                     <span>
                       {group.name}（{accounts.length}）
                     </span>
+                    {unreadTotal > 0 && (
+                      <span
+                        className="account-group__unread"
+                        aria-label={`${group.name}有${unreadTotal}条未读消息`}
+                      >
+                        {unreadTotal}
+                      </span>
+                    )}
                   </button>
                   <button
                     type="button"

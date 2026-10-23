@@ -37,6 +37,29 @@ const ServicesStore = jest.requireActual<
 >('../../src/stores/ServicesStore').default;
 
 describe('ServicesStore', () => {
+  it('does not replace live WhatsApp unread totals with the slower DOM recipe badge', () => {
+    const service = { recipe: { id: 'whatsapp' }, accountUnreadLive: true };
+    const setUnreadMessageCount = jest.fn();
+    const store = Object.create(ServicesStore.prototype) as ServicesStoreClass;
+    Object.assign(store, {
+      one: () => service,
+      actions: { service: { setUnreadMessageCount } },
+    });
+    store._handleIPCMessage({
+      serviceId: 'target',
+      channel: 'message-counts',
+      args: [{ direct: 1, indirect: 0 }],
+    });
+    expect(setUnreadMessageCount).not.toHaveBeenCalled();
+    service.accountUnreadLive = false;
+    store._handleIPCMessage({
+      serviceId: 'target',
+      channel: 'message-counts',
+      args: [{ direct: 1, indirect: 0 }],
+    });
+    expect(setUnreadMessageCount).toHaveBeenCalledTimes(1);
+  });
+
   it('manually sleeps only the selected account even when automatic hibernation is disabled', () => {
     const target = {
       canHibernate: false,

@@ -246,8 +246,10 @@ export async function readWhatsAppSnapshot(): Promise<AccountSnapshot> {
           !chat.isPSA &&
           ['c.us', 'lid', 'g.us'].includes(server) &&
           Number.isFinite(chat.unreadCount) &&
-          chat.unreadCount > 0
-            ? Math.floor(chat.unreadCount)
+          (chat.unreadCount > 0 || chat.unreadCount === -1)
+            ? chat.unreadCount === -1
+              ? 1
+              : Math.floor(chat.unreadCount)
             : 0;
       }
       return count;

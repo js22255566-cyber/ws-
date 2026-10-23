@@ -124,6 +124,10 @@ export default class AppStore extends TypedStore {
 
   @observable updateStatus = '';
 
+  @observable updateDownloading = false;
+
+  @observable updateDownloadProgress = 0;
+
   @observable updateVersion = '';
 
   @observable locale = ferdiumLocale;
@@ -249,7 +253,12 @@ export default class AppStore extends TypedStore {
     setTimeout(() => this._checkForUpdates({ manual: false }), ms('30s'));
     ipcRenderer.on('autoUpdate', (_, data) => {
       runInAction(() => {
-        if (data.checking) this.updateStatus = this.updateStatusTypes.CHECKING;
+        this.updateDownloading = Boolean(data.downloading);
+        this.updateDownloadProgress = data.progress || 0;
+        if (data.downloaded)
+          this.updateStatus = this.updateStatusTypes.DOWNLOADED;
+        else if (data.checking)
+          this.updateStatus = this.updateStatusTypes.CHECKING;
         else if (data.error) this.updateStatus = this.updateStatusTypes.FAILED;
         else if (data.available === true) {
           this.updateVersion = data.version;

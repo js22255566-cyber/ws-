@@ -238,7 +238,70 @@ export async function groupGuest(request: {
   try {
     attempted = true;
     if (task.operation === 'join') {
-      const joined = await wpp.group.join(task.target);
+      let joined: any;
+      try {
+        joined = await wpp.group.join(task.target);
+      } catch (error) {
+        // WA-JS 4.7.1 matches joinGroupViaInvite together with resetGroupInviteCode.
+        // New WhatsApp builds split these exports; resolve the exact callable
+        // from native invite modules instead of changing any server request.
+        if (!/joinGroupViaInvite.*not a function/.test(String(error)))
+          throw error;
+        attempted = false; // The missing callable never submitted a join request.
+        const verified = await check();
+        if (verified.status !== 'not-done') return verified;
+        const info = await wpp.group.getGroupInfoFromInviteCode(task.target);
+        let native: any;
+        let host: any;
+        const registry = page.require?.('__debug')?.modulesMap;
+        const names =
+          registry instanceof Map
+            ? [...registry.keys()]
+            : Object.keys(registry || {});
+        for (const name of names) {
+          if (!/^waweb.*(?:group.*invite|invite.*group)/i.test(name)) continue;
+          try {
+            const module = page.require(name);
+            const candidates = [module, module?.default];
+            host = candidates.find(
+              value => typeof value?.joinGroupViaInvite === 'function',
+            );
+            if (host) {
+              native = host.joinGroupViaInvite;
+              break;
+            }
+          } catch {
+            /* Unloaded native modules are not a valid adapter. */
+          }
+        }
+        if (!native)
+          throw new Error('当前 WhatsApp 进群接口不兼容，请更新软件后重试');
+        if (!own()) throw new Error('账号身份已变化，进群已取消');
+        try {
+          attempted = true;
+          const result = await native.call(
+            host,
+            task.target,
+            Boolean(info.membershipApprovalMode),
+          );
+          joined = {
+            id: result?.gid || result?.id,
+            pendingApproval: Boolean(
+              result?.membershipApprovalMode ?? info.membershipApprovalMode,
+            ),
+          };
+        } catch (nativeError: any) {
+          if (
+            nativeError?.name !== 'UnexpectedJoinGroupViaInviteResponse' ||
+            !nativeError.gid
+          )
+            throw nativeError;
+          joined = {
+            id: nativeError.gid,
+            pendingApproval: Boolean(nativeError.membershipApprovalMode),
+          };
+        }
+      }
       const id = idOf(joined?.id || joined);
       task.groupId = id || before.groupId;
       if (joined?.pendingApproval) {

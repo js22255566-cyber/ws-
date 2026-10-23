@@ -20,6 +20,7 @@ import {
   mergeAccountSnapshot,
   accountIdentity,
 } from '../../../features/accounts/whatsapp';
+import { watchWhatsAppUnread } from '../../../features/accounts/unread';
 import { configureTranslation } from '../../../features/accountTools/runtime';
 
 const debug = require('../../../preload-safe-debug')('Ferdium:Services');
@@ -77,6 +78,8 @@ class ServiceWebview extends Component<IProps> {
 
   private accountPollRunning = false;
 
+  private unreadRevision = 0;
+
   private lastAppliedZoom: number | null = null;
 
   private lastStoredIdentity = '';
@@ -94,7 +97,9 @@ class ServiceWebview extends Component<IProps> {
     )
       return;
     this.accountPollRunning = true;
+    const { unreadRevision } = this;
     try {
+      await view.executeJavaScript(`(${watchWhatsAppUnread.toString()})()`);
       await view.executeJavaScript(
         `(${applyWhatsAppTheme.toString()})(${Boolean(stores?.ui.isDarkThemeActive || service.isDarkModeEnabled)})`,
       );
@@ -112,7 +117,8 @@ class ServiceWebview extends Component<IProps> {
           snapshot,
         );
         if (
-          Number.isFinite(snapshot.unreadMessages) ||
+          (unreadRevision === this.unreadRevision &&
+            Number.isFinite(snapshot.unreadMessages)) ||
           snapshot.status === 'logged-out'
         ) {
           service.unreadDirectMessageCount = snapshot.unreadMessages ?? 0;
@@ -156,7 +162,45 @@ class ServiceWebview extends Component<IProps> {
     }
   };
 
+  handleUnread = (event: Electron.IpcMessageEvent): void => {
+    if (
+      event.channel !== 'zl-wa-unread' ||
+      event.currentTarget !== this.webview?.view ||
+      this.disposed
+    )
+      return;
+    const { service } = this.props;
+    const value = event.args?.[0];
+    if (
+      !service.isEnabled ||
+      service.isHibernating ||
+      service.recipe.id !== 'whatsapp' ||
+      !value ||
+      !/^\d{5,30}@(c\.us|lid)$/.test(value.ownerId) ||
+      !Number.isSafeInteger(value.count) ||
+      value.count < 0
+    )
+      return;
+    const owners = [
+      service.accountSnapshot.ownerId,
+      ...(service.accountSnapshot.ownerIds || []),
+    ];
+    if (service.accountSnapshot.ownerId && !owners.includes(value.ownerId))
+      return;
+    this.unreadRevision += 1;
+    service.accountUnreadLive = true;
+    runInAction(() => {
+      service.unreadDirectMessageCount = value.count;
+      service.unreadIndirectMessageCount = 0;
+      service.accountSnapshot = {
+        ...service.accountSnapshot,
+        unreadMessages: value.count,
+      };
+    });
+  };
+
   accountNavigationStarted = (): void => {
+    this.props.service.accountUnreadLive = false;
     this.lastAppliedZoom = null;
     runInAction(() => {
       this.props.service.accountSnapshot = {
@@ -266,6 +310,7 @@ class ServiceWebview extends Component<IProps> {
         'did-start-loading',
         this.accountNavigationStarted,
       );
+      webview.addEventListener('ipc-message', this.handleUnread);
       webview.addEventListener('did-stop-loading', this.pollAccount);
       this.accountPollTimer = setInterval(() => {
         this.pollAccount();
@@ -294,6 +339,8 @@ class ServiceWebview extends Component<IProps> {
       this.accountNavigationStarted,
     );
     webview.removeEventListener('did-stop-loading', this.pollAccount);
+    webview.removeEventListener('ipc-message', this.handleUnread);
+    this.props.service.accountUnreadLive = false;
   }
 
   @action _setWebview(webview: ElectronWebView | null): void {

@@ -186,6 +186,10 @@
                 if (typeof values !== 'object')
                   throw Error('Native model expects an attribute object');
                 Object.assign(chat, values);
+                for (const key of Object.keys(values))
+                  fixture.chatListeners
+                    ?.get('change:' + key)
+                    ?.forEach(fn => fn());
                 fixture.renderChats();
               };
               const row = document.createElement('div');
@@ -282,9 +286,16 @@
           this._serialized = x.id;
         }
       }
+      fixture.chatListeners = new Map();
       const modules = {
         WAWebCollections: {
           Chat: {
+            on: (name, fn) => {
+              if (!fixture.chatListeners.has(name))
+                fixture.chatListeners.set(name, new Set());
+              fixture.chatListeners.get(name).add(fn);
+            },
+            off: (name, fn) => fixture.chatListeners.get(name)?.delete(fn),
             getModelsArray: () => chats,
             get: id => {
               const group = fixture.groupRows?.find(g => g.id === id);
@@ -469,6 +480,7 @@
       };
       fixture.installGroupTools = () => {
         fixture.beforeGroupWPP = window.WPP;
+        fixture.beforeGroupRequire = window.require;
         fixture.groupRows = [
           {
             id: '10001@g.us',
@@ -579,6 +591,25 @@
             },
           },
         };
+        // Exercise the real broken WA-JS join wrapper and the native fallback.
+        const nativeJoin = window.WPP.group.join;
+        window.WPP.group.join = async () => {
+          throw new TypeError('(0, d.joinGroupViaInvite) is not a function');
+        };
+        const nativeModule = {
+          joinGroupViaInvite: async (code, approval) => {
+            const result = await nativeJoin(code);
+            if (result.pendingApproval !== approval)
+              throw Error('approval mode mismatch');
+            return { gid: result.id };
+          },
+        };
+        window.require = name =>
+          name === '__debug'
+            ? { modulesMap: { WAWebFixtureGroupInviteJob: {} } }
+            : name === 'WAWebFixtureGroupInviteJob'
+              ? nativeModule
+              : fixture.beforeGroupRequire(name);
         return true;
       };
       document.querySelector('footer button').addEventListener('click', send);

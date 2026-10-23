@@ -19,6 +19,7 @@ const { defaultTools } = require('../build/features/accountTools/config');
 const advanced = require('../build/features/accountTools/bulkGuest');
 const customers = require('../build/features/customers/guest');
 const { groupGuest } = require('../build/features/groups/guest');
+const { watchWhatsAppUnread } = require('../build/features/accounts/unread');
 
 (async () => {
   const modules = {
@@ -35,6 +36,9 @@ const { groupGuest } = require('../build/features/groups/guest');
   const context = vm.createContext({
     setTimeout,
     clearTimeout,
+    setInterval: () => 1,
+    clearInterval: () => {},
+    queueMicrotask,
     location: { hostname: 'web.whatsapp.com' },
     navigator: { onLine: true },
     window: { require: name => modules[name], addEventListener() {} },
@@ -63,6 +67,8 @@ const { groupGuest } = require('../build/features/groups/guest');
     call(groupGuest, [{ ownerId: '8613800000001@c.us' }]),
     /群组接口尚未就绪/,
   );
+  assert.equal(call(watchWhatsAppUnread), true);
+  context.window.__zlWaUnread.dispose();
   const snapshot = await call(readWhatsAppSnapshot);
   assert.equal(snapshot.status, 'online');
   const receipts = await call(markAllWhatsAppRead);

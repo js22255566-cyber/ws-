@@ -100,6 +100,58 @@ describe('native group adapter verification', () => {
     ).toMatchObject({ status: 'success', groupId });
     expect(wpp.group.join).toHaveBeenCalledTimes(1);
   });
+  it('recovers the missing WA-JS join function from a native module split from resetGroupInviteCode', async () => {
+    groups = [];
+    wpp.group.join.mockRejectedValue(
+      new TypeError('(0, d.joinGroupViaInvite) is not a function'),
+    );
+    const native = jest.fn(async () => {
+      groups = [{ id: groupId, announce: false }];
+      return { gid: groupId };
+    });
+    (window as any).require = name =>
+      name === '__debug'
+        ? { modulesMap: { WAWebGroupInviteJob: {} } }
+        : name === 'WAWebGroupInviteJob'
+          ? { joinGroupViaInvite: native }
+          : undefined;
+    expect(
+      await groupGuest({ ownerId, task: task('join'), execute: true }),
+    ).toMatchObject({ status: 'success' });
+    expect(native).toHaveBeenCalledWith('Abcdefghijklmnopqrstuv', false);
+    expect(native).toHaveBeenCalledTimes(1);
+  });
+  it('keeps pending approval separate when the native fallback requires approval', async () => {
+    groups = [];
+    wpp.group.join.mockRejectedValue(
+      new TypeError('joinGroupViaInvite is not a function'),
+    );
+    wpp.group.getGroupInfoFromInviteCode.mockResolvedValue({
+      id: groupId,
+      membershipApprovalMode: true,
+    });
+    const native = jest.fn(async () => ({ gid: groupId }));
+    (window as any).require = name =>
+      name === '__debug'
+        ? { modulesMap: { WAWebGroupInviteJob: {} } }
+        : { joinGroupViaInvite: native };
+    expect(
+      await groupGuest({
+        ownerId,
+        task: task('join'),
+        execute: true,
+      }),
+    ).toMatchObject({ status: 'approval' });
+    expect(native).toHaveBeenCalledWith('Abcdefghijklmnopqrstuv', true);
+  });
+  it('does not try another join adapter after an ambiguous transport failure', async () => {
+    groups = [];
+    wpp.group.join.mockRejectedValue(new Error('connection lost'));
+    const native = jest.fn();
+    (window as any).require = () => ({ joinGroupViaInvite: native });
+    await groupGuest({ ownerId, task: task('join'), execute: true });
+    expect(native).not.toHaveBeenCalled();
+  });
   it('accepts an applied change even when the request later throws', async () => {
     wpp.group.setProperty.mockImplementation(async () => {
       groups[0].announce = true;

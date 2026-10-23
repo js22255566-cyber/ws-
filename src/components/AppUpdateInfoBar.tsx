@@ -9,21 +9,37 @@ export interface IProps {
   onInstallUpdate: MouseEventHandler<HTMLButtonElement>;
   onHide: () => void;
   updateVersionParsed: string;
+  downloaded?: boolean;
+  downloading?: boolean;
+  progress?: number;
 }
 
 const AppUpdateInfoBar = (props: IProps) => {
-  const { onInstallUpdate, updateVersionParsed, onHide } = props;
+  const {
+    onInstallUpdate,
+    updateVersionParsed,
+    onHide,
+    downloaded,
+    downloading,
+    progress,
+  } = props;
 
   return (
     <InfoBar
       type="primary"
-      ctaLabel="前往 GitHub 下载"
+      ctaLabel={
+        downloaded
+          ? '退出并安装'
+          : downloading
+            ? `下载中 ${progress || 0}%`
+            : '下载安装更新'
+      }
       onClick={onInstallUpdate}
       onHide={onHide}
     >
       <Icon icon={mdiInformation} />
       <p style={{ padding: '0 0.5rem 0 1rem' }}>
-        发现 ZL-WA 新版本{' '}
+        {downloaded ? '更新包已下载并校验：' : '发现 ZL-WA 新版本'}{' '}
         {new URLSearchParams(updateVersionParsed).get('version')}。
       </p>
 

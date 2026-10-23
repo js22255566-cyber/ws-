@@ -87,6 +87,46 @@ describe('verified group queue', () => {
       attempts: 3,
     });
   });
+  it('tries every join once before retrying verified failures once at the end', async () => {
+    const order: string[] = [];
+    const attempts = new Map<string, number>();
+    const codes = [
+      'AAAAAAAAAAAAAAAAAAAAAA',
+      'BBBBBBBBBBBBBBBBBBBBBB',
+      'CCCCCCCCCCCCCCCCCCCCCC',
+    ];
+    const { queue, adapter } = setup({
+      execute: async task => {
+        order.push(task.target);
+        const count = (attempts.get(task.target) || 0) + 1;
+        attempts.set(task.target, count);
+        return task.target === codes[1] || count === 2 ? success() : pending();
+      },
+    });
+    await queue.start(
+      'join',
+      codes.map(code => ({ ...target, target: code })),
+      5,
+    );
+    expect(order).toEqual([codes[0], codes[1], codes[2], codes[0], codes[2]]);
+    expect(queue.state.batches[0].tasks.map(t => t.attempts)).toEqual([
+      2, 1, 2,
+    ]);
+    expect(adapter.wait).toHaveBeenCalledTimes(4);
+  });
+  it('does not make a third automatic join attempt when both rounds fail', async () => {
+    const { queue, adapter } = setup({ execute: async () => pending() });
+    await queue.start(
+      'join',
+      [{ ...target, target: 'AAAAAAAAAAAAAAAAAAAAAA' }],
+      5,
+    );
+    expect(adapter.execute).toHaveBeenCalledTimes(2);
+    expect(queue.state.batches[0].tasks[0]).toMatchObject({
+      status: 'failed',
+      attempts: 2,
+    });
+  });
   it('treats missing admin privileges as failure without repeatedly mutating', async () => {
     const { queue, adapter } = setup({
       check: async () => ({

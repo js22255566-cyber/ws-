@@ -106,6 +106,8 @@ class AppLayoutContainer extends Component<IProps> {
             settings={settings}
             isFullScreen={app.isFullScreen}
             showServicesUpdatedInfoBar={ui.showServicesUpdatedInfoBar}
+            updateDownloading={app.updateDownloading}
+            updateDownloadProgress={app.updateDownloadProgress}
             appUpdateIsDownloaded={
               app.updateStatus === app.updateStatusTypes.DOWNLOADED
             }

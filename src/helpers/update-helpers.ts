@@ -47,6 +47,6 @@ export async function getUpdateInfoFromGH(
     const tag = getFerdiumVersion(currentLocation, ferdiumVersion);
     return await ipcRenderer.invoke('zl-updates-notes', tag.slice(1));
   } catch {
-    return `### ${intl.formatMessage(messages.connectionErrorPageMissing)}\n\n请打开 ZL-WA 的 GitHub 发布页查看更新说明；私有仓库需要在更新设置中配置访问权限。`;
+    return `### ${intl.formatMessage(messages.connectionErrorPageMissing)}\n\n请检查网络后重试，或打开 ZL-WA 发布页查看更新说明。`;
   }
 }

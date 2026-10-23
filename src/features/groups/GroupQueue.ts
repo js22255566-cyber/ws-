@@ -237,12 +237,18 @@ export default class GroupQueue {
     this.notify();
     let paced = false;
     try {
-      for (const task of tasks) {
+      const work = [...tasks];
+      const deferred = new Set<string>();
+      for (const task of work) {
         if (this.stopped) break;
         if (paced) await this.pause(batch.interval * 1000);
         if (this.stopped) break;
         paced = true;
-        for (let attempt = 0; attempt < 3; attempt += 1) {
+        for (
+          let attempt = 0;
+          attempt < (batch.mode === 'join' ? 1 : 3);
+          attempt += 1
+        ) {
           if (this.stopped) break;
           task.status = 'running';
           task.message = '正在核验当前状态';
@@ -269,6 +275,19 @@ export default class GroupQueue {
           if (result.inFlight) {
             this.stopped = true;
             this.error = '上一项仍可能执行中，队列已暂停；请稍后核验未确认项';
+            break;
+          }
+          if (batch.mode === 'join') {
+            if (
+              result.status === 'not-done' &&
+              result.retryable !== false &&
+              !deferred.has(task.id)
+            ) {
+              deferred.add(task.id);
+              work.push(task);
+              task.message = `${result.message}；首轮完成后再重试一次`;
+              this.notify();
+            }
             break;
           }
           if (

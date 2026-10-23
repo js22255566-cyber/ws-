@@ -5,6 +5,9 @@ export const RELEASES_URL = `https://github.com/${UPDATE_REPOSITORY}/releases`;
 export const RELEASES_API = `https://api.github.com/repos/${UPDATE_REPOSITORY}/releases`;
 export interface UpdateState {
   checking?: boolean;
+  downloading?: boolean;
+  downloaded?: boolean;
+  progress?: number;
   available?: boolean;
   version?: string;
   error?: { message: string };

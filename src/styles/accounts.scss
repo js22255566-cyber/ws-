@@ -130,8 +130,16 @@
   &__more {
     display: flex;
     align-items: center;
-    padding: 3px 0;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    flex: 0 0 28px;
+    padding: 4px !important;
     color: #a5acb9 !important;
+    svg {
+      width: 20px !important;
+      height: 20px !important;
+    }
   }
   &__cards {
     display: flex;
@@ -223,23 +231,35 @@
   &__more {
     position: absolute;
     right: 2px;
-    top: 5px;
-    padding: 3px !important;
+    top: 3px;
+    width: 28px;
+    height: 28px;
+    padding: 4px !important;
     display: flex;
+    align-items: center;
+    justify-content: center;
     color: #a1adbf !important;
+    svg {
+      width: 20px !important;
+      height: 20px !important;
+    }
   }
   &__sleep {
     position: absolute;
-    right: 25px;
+    right: 34px;
     top: 5px;
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 25px;
-    height: 25px;
+    width: 26px;
+    height: 26px;
     padding: 2px !important;
     border-radius: 50%;
     color: #a1adbf !important;
+    svg {
+      width: 20px !important;
+      height: 20px !important;
+    }
     &:hover {
       background: #303b4c;
       color: #fff !important;
@@ -362,9 +382,16 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  flex: 0 0 28px;
+  width: 36px;
+  height: 40px;
+  flex: 0 0 36px;
+  padding: 4px !important;
+  border: 1px solid #586373 !important;
   border-radius: 6px;
+  svg {
+    width: 24px !important;
+    height: 24px !important;
+  }
   &:hover {
     background: #252a34;
   }
@@ -376,7 +403,7 @@
   padding: 8px 5px;
   .account-sidebar__header {
     justify-content: center;
-    flex-basis: 28px;
+    flex-basis: 40px;
   }
   .account-sidebar__new-group,
   .account-group__header,
@@ -419,4 +446,52 @@
   .account-sidebar__footer {
     justify-content: center;
   }
+}
+
+.account-remark-dialog {
+  .MuiPopover-paper {
+    width: 300px;
+    max-width: calc(100vw - 16px);
+    margin-top: 4px;
+  }
+  .MuiDialogTitle-root {
+    padding: 10px 12px 2px;
+    font-size: 14px;
+    line-height: 20px;
+  }
+  .MuiDialogContent-root {
+    padding: 4px 12px 0;
+  }
+  .MuiFormHelperText-root {
+    font-size: 10px;
+    line-height: 14px;
+    margin: 3px 0 0;
+  }
+  .MuiDialogActions-root {
+    padding: 5px 8px 8px;
+  }
+  .MuiDialogActions-root button {
+    min-width: 48px;
+    padding: 3px 10px;
+    font-size: 12px;
+  }
+}
+
+.account-context-menu.account-session-menu .MuiPaper-root {
+  width: 128px;
+  min-width: 128px;
+  max-width: 128px;
+  .MuiMenuItem-root {
+    padding: 8px 10px;
+    gap: 8px;
+    white-space: nowrap;
+  }
+}
+.account-group__toggle .account-group__unread {
+  flex-shrink: 0;
+  margin-left: 6px;
+  color: #e53935;
+  font-size: 20px;
+  font-weight: 800;
+  line-height: 1.2;
 }

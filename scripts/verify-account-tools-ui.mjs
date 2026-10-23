@@ -388,7 +388,7 @@ try {
         'dialog input',
       );
       await wait(
-        `getComputedStyle(document.querySelector('.account-dialog .MuiDialog-container')).opacity === '1'`,
+        `getComputedStyle(document.querySelector('.account-dialog .MuiDialog-container, .account-dialog .MuiPopover-paper')).opacity === '1'`,
         'dialog opening transition completed',
       );
       const rect = await evaluate(
@@ -423,6 +423,19 @@ try {
       'new group saved',
     );
     await click(`[data-service-id="${first}"] .account-card__remark`);
+    await wait(
+      `!!document.querySelector('.account-remark-dialog [role="dialog"]')`,
+      'compact card remark popup',
+    );
+    const remarkBounds = await evaluate(
+      `(()=>{const c=document.querySelector('[data-service-id="${first}"]').getBoundingClientRect();const p=document.querySelector('.account-remark-dialog [role="dialog"]').getBoundingClientRect();return{cardBottom:c.bottom,cardLeft:c.left,top:p.top,left:p.left,width:p.width,height:p.height}})()`,
+    );
+    assert(Math.abs(remarkBounds.left - remarkBounds.cardLeft) < 2);
+    assert(
+      remarkBounds.top >= remarkBounds.cardBottom &&
+        remarkBounds.top - remarkBounds.cardBottom < 12,
+    );
+    assert(remarkBounds.width <= 302 && remarkBounds.height < 180);
     await typeInVisibleDialog('GUI测试备注');
     await clickText('保存');
     await wait(
@@ -1706,6 +1719,87 @@ try {
     ),
     'rgba(0, 0, 0, 0)',
     'account unread count has no background',
+  );
+  const unreadStarted = Date.now();
+  await guest(first, `fixture.chats[1].set({unreadCount:9});true`);
+  await wait(
+    `${service(first)}.unreadDirectMessageCount===13`,
+    'native unread change immediately reaches the card',
+  );
+  assert(
+    Date.now() - unreadStarted < 800,
+    'unread update must bypass the six-second profile poll',
+  );
+  await guest(first, `fixture.chats[1].set({unreadCount:3});true`);
+  await wait(
+    `${service(first)}.unreadDirectMessageCount===7`,
+    'reading clears live unread totals',
+  );
+  const backgroundTotal = await evaluate(
+    `${service(second)}.unreadDirectMessageCount`,
+  );
+  const backgroundUnread = await guest(
+    second,
+    'fixture.chats[1].unreadCount || 0',
+  );
+  const backgroundStarted = Date.now();
+  await guest(second, `fixture.chats[1].set({unreadCount:6});true`);
+  await wait(
+    `${service(second)}.unreadDirectMessageCount===6`,
+    'background account unread updates immediately',
+  );
+  assert(
+    Date.now() - backgroundStarted < 800,
+    'background unread bypasses the profile poll',
+  );
+  await guest(
+    second,
+    `fixture.chats[1].set({unreadCount:${backgroundUnread}});true`,
+  );
+  await wait(
+    `${service(second)}.unreadDirectMessageCount===${backgroundTotal}`,
+    'background read state restored',
+  );
+  const groupId = await evaluate(
+    `document.querySelector('[data-service-id="${first}"]').closest('.account-group').dataset.groupId`,
+  );
+  const groupSelector = `.account-group[data-group-id="${groupId}"]`;
+  const groupTotal = await evaluate(
+    `Number(document.querySelector(${JSON.stringify(groupSelector)}+' .account-group__unread').textContent)`,
+  );
+  const groupBase = groupTotal - 7;
+  const firstViewId = await evaluate(
+    `${service(first)}.webview.getWebContentsId()`,
+  );
+  await click(`${groupSelector} .account-group__toggle`);
+  await wait(
+    `!document.querySelector(${JSON.stringify(groupSelector)}+' .account-group__cards')`,
+    'account group collapsed',
+  );
+  await guest(first, `fixture.chats[1].set({unreadCount:0});true`);
+  await wait(
+    `document.querySelector(${JSON.stringify(groupSelector)}+' .account-group__unread')?.textContent==='${groupBase + 4}'`,
+    'collapsed group total clears read messages',
+  );
+  await guest(first, `fixture.chats[1].set({unreadCount:-1});true`);
+  await wait(
+    `${service(first)}.unreadDirectMessageCount===5 && document.querySelector(${JSON.stringify(groupSelector)}+' .account-group__unread')?.textContent==='${groupBase + 5}'`,
+    'manual unread adds one to both the account and folded group',
+  );
+  assert.equal(
+    await evaluate(`${service(first)}.webview.getWebContentsId()`),
+    firstViewId,
+  );
+  await guest(first, `fixture.chats[1].set({unreadCount:0});true`);
+  await wait(
+    `${service(first)}.unreadDirectMessageCount===4`,
+    'reading manual unread clears its reminder',
+  );
+  await guest(first, `fixture.chats[1].set({unreadCount:3});true`);
+  await click(`${groupSelector} .account-group__toggle`);
+  await wait(
+    `!!document.querySelector('[data-service-id="${first}"]') && ${service(first)}.unreadDirectMessageCount===7`,
+    'group expanded without resetting live counts',
   );
   await guest(first, `fixture.chats[0].muteExpiration=-1;true`);
   await wait(

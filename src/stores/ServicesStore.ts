@@ -838,6 +838,9 @@ export default class ServicesStore extends TypedStore {
         break;
       }
       case 'message-counts': {
+        // WhatsApp's DOM recipe reports chat badges, not the live unread-message total.
+        if (service.recipe.id === 'whatsapp' && service.accountUnreadLive)
+          break;
         debug(`Received unread message info from '${serviceId}'`, args[0]);
 
         this.actions.service.setUnreadMessageCount({

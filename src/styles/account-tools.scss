@@ -914,6 +914,9 @@
     grid-template-columns: repeat(4, 1fr);
     gap: 5px;
   }
+  .group-tools-counts:not(.has-approval) {
+    grid-template-columns: repeat(3, 1fr);
+  }
   .group-tools-counts > span {
     padding: 8px;
     text-align: center;

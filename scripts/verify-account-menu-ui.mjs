@@ -33,6 +33,43 @@ try {
     `!!document.querySelector('.account-card__more')`,
     'existing account card',
   );
+  const icon = await evaluate(
+    `(()=>{const r=document.querySelector('.account-card__sleep svg').getBoundingClientRect();return {width:r.width,height:r.height}})()`,
+  );
+  assert.equal(icon.width, 20);
+  assert.equal(icon.height, 20);
+  const cardPoint = await evaluate(
+    `(()=>{const r=document.querySelector('.account-card').getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`,
+  );
+  await call('Input.dispatchMouseEvent', {
+    type: 'mousePressed',
+    ...cardPoint,
+    button: 'right',
+    buttons: 2,
+    clickCount: 1,
+  });
+  await call('Input.dispatchMouseEvent', {
+    type: 'mouseReleased',
+    ...cardPoint,
+    button: 'right',
+    buttons: 0,
+    clickCount: 1,
+  });
+  await wait(
+    `!!document.querySelector('.account-session-menu [role="menu"]')`,
+    'right click opens account menu',
+  );
+  await wait(
+    `getComputedStyle(document.querySelector('.account-session-menu .MuiPaper-root')).opacity==='1'`,
+    'right-click menu visible',
+  );
+  const bounds = await evaluate(
+    `(()=>{const p=document.querySelector('.account-session-menu .MuiPaper-root').getBoundingClientRect(),b=document.querySelector('.account-card__more').getBoundingClientRect();return{width:p.width,right:p.right,anchorRight:b.right}})()`,
+  );
+  assert(bounds.width >= 126 && bounds.width <= 132);
+  assert(Math.abs(bounds.right - bounds.anchorRight) < 2);
+  await mouseClick(20, await evaluate('innerHeight-100'));
+  await closed();
   const before = await evaluate(
     `document.querySelector('.account-sidebar').textContent`,
   );

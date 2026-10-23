@@ -202,6 +202,13 @@ export async function verifyGroups({
     `!!document.querySelector('.group-tools-accounts')`,
     'leave dialog',
   );
+  assert.equal(
+    await evaluate(
+      `document.querySelector('.group-tools-counts .group-tools-approval')!==null`,
+    ),
+    false,
+    'leave window has no approval statistic',
+  );
   await click(`.group-tools-account[data-account-id="${first}"] input`);
   await wait(
     `document.querySelectorAll('.group-tools-group').length===5`,
@@ -264,10 +271,19 @@ export async function verifyGroups({
     true,
     'unselected account preserved',
   );
+  assert.equal(
+    await evaluate(
+      `document.querySelectorAll('.group-tools-counts > span').length`,
+    ),
+    3,
+  );
   await shot('/workspace/ZL-WA-groups-leave.png');
   await click('[aria-label="关闭群组窗口"]');
   for (const id of [first, second])
-    await guest(id, `window.WPP=fixture.beforeGroupWPP;true`);
+    await guest(
+      id,
+      `window.WPP=fixture.beforeGroupWPP;window.require=fixture.beforeGroupRequire;true`,
+    );
   console.log(
     'PASS native group dialogs: admin-only lists, three-second pacing, lost-response reconciliation, bounded retries, every account joins all unique links, pending approvals, background close, read-only refresh, leave/delete recovery and account isolation',
   );
