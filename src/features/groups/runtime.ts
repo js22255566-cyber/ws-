@@ -1,5 +1,11 @@
 import { ipcRenderer } from 'electron';
+import { runInAction } from 'mobx';
 import type { RealStores } from '../../stores';
+import {
+  readWhatsAppSnapshot,
+  mergeAccountSnapshot,
+  type AccountSnapshot,
+} from '../accounts/whatsapp';
 import { ensureBulkLibrary } from '../accountTools/bulkRuntime';
 import GroupQueue from './GroupQueue';
 import { groupGuest } from './guest';
@@ -15,6 +21,66 @@ export class GroupRuntime {
       check: task => this.perform(task, false),
       execute: task => this.perform(task, true),
     });
+  }
+
+  async refreshAccounts(): Promise<{ refreshed: number; failed: number }> {
+    const services = this.stores.services.all.filter(
+      s =>
+        s.recipe.id === 'whatsapp' &&
+        s.isEnabled &&
+        !s.isHibernating &&
+        s.webview,
+    );
+    const results = await Promise.allSettled(
+      services.map(async current => {
+        const service = current;
+        const view = service.webview!;
+        const snapshot = await this.withTimeout<AccountSnapshot>(
+          view.executeJavaScript(`(${readWhatsAppSnapshot.toString()})()`),
+          '读取账号状态超时，请稍后重试',
+        );
+        if (
+          service.webview !== view ||
+          !service.isEnabled ||
+          service.isHibernating
+        )
+          throw new Error('账号窗口已变化');
+        runInAction(() => {
+          service.accountSnapshot = mergeAccountSnapshot(
+            service.accountSnapshot,
+            snapshot,
+          );
+          if (
+            Number.isFinite(snapshot.unreadMessages) ||
+            snapshot.status === 'logged-out'
+          ) {
+            service.unreadDirectMessageCount = snapshot.unreadMessages ?? 0;
+            service.unreadIndirectMessageCount = 0;
+          }
+        });
+      }),
+    );
+    return {
+      refreshed: results.filter(r => r.status === 'fulfilled').length,
+      failed: results.filter(r => r.status === 'rejected').length,
+    };
+  }
+
+  private async withTimeout<T>(
+    request: Promise<T>,
+    message: string,
+  ): Promise<T> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        request,
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error(message)), 30_000);
+        }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   private viewFor(target: Pick<GroupTarget, 'accountId' | 'ownerId'>) {
@@ -42,11 +108,17 @@ export class GroupRuntime {
     target: Pick<GroupTarget, 'accountId' | 'accountName' | 'ownerId'>,
   ): Promise<GroupChoice[]> {
     const view = this.viewFor(target);
-    await ensureBulkLibrary(view);
+    await this.withTimeout(
+      ensureBulkLibrary(view),
+      '群组接口准备超时，请稍后重试',
+    );
     if (this.viewFor(target) !== view)
       throw new Error('账号窗口已变化，请重新读取');
-    const result = await view.executeJavaScript(
-      `(${groupGuest.toString()})(${JSON.stringify({ ownerId: target.ownerId })})`,
+    const result = await this.withTimeout(
+      view.executeJavaScript(
+        `(${groupGuest.toString()})(${JSON.stringify({ ownerId: target.ownerId })})`,
+      ),
+      '读取群组超时，请点击刷新群组重试',
     );
     if (!Array.isArray(result.groups))
       throw new Error(result.message || '读取群组失败');

@@ -512,8 +512,15 @@
           },
           whatsapp: {
             ...previous.whatsapp,
-            queryAllGroups: async () =>
-              fixture.groupRows.filter(g => g.member).map(g => ({ ...g })),
+            functions: {
+              ...previous.whatsapp?.functions,
+              queryAllGroups: async () => {
+                fixture.groupReads = (fixture.groupReads || 0) + 1;
+                return fixture.groupRows
+                  .filter(g => g.member)
+                  .map(g => ({ ...g }));
+              },
+            },
             ChatStore: { get: id => (row(id)?.chat ? row(id) : undefined) },
           },
           group: {

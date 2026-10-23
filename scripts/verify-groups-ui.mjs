@@ -14,6 +14,26 @@ export async function verifyGroups({
 }) {
   for (const id of [first, second])
     await guest(id, 'fixture.installGroupTools()');
+  const tap = async selector => {
+    const point = await evaluate(
+      `(()=>{const n=document.querySelector(${JSON.stringify(selector)});n.scrollIntoView({block:'center'});const r=n.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`,
+    );
+    for (const type of ['mousePressed', 'mouseReleased'])
+      await call('Input.dispatchMouseEvent', {
+        type,
+        ...point,
+        button: 'left',
+        buttons: type === 'mousePressed' ? 1 : 0,
+        clickCount: 1,
+      });
+  };
+  const verifyAccountRefresh = async () => {
+    await tap('[aria-label="刷新账号列表"]');
+    await wait(
+      `document.querySelector('.group-tools-accounts [role="status"]')?.textContent.includes('已刷新 2 个账号')`,
+      'account refresh has a visible result',
+    );
+  };
   const finish = async (success, approval = 0) =>
     wait(
       `document.querySelectorAll('.group-tools-log [data-task-status="success"]').length===${success} && document.querySelectorAll('.group-tools-log [data-task-status="approval"]').length===${approval} && ![...document.querySelectorAll('.group-tools-dialog button')].some(b=>b.textContent==='停止执行')`,
@@ -69,6 +89,23 @@ export async function verifyGroups({
     `document.querySelectorAll('.group-tools-group').length===2`,
     'only manageable groups listed',
   );
+  await verifyAccountRefresh();
+  await wait(
+    `!document.querySelector('[aria-label="刷新群组"]').disabled`,
+    'group refresh available',
+  );
+  const readsBefore = await guest(first, 'fixture.groupReads');
+  await guest(
+    first,
+    `fixture.groupRows.find(g=>g.id==='10001@g.us').subject='刷新后的管理群 A';true`,
+  );
+  await tap('[aria-label="刷新群组"]');
+  await wait(
+    `document.querySelector('.group-tools-selection').textContent.includes('刷新后的管理群 A') && !document.querySelector('[aria-label="刷新群组"]').disabled`,
+    'refresh reads selected account groups',
+  );
+  assert((await guest(first, 'fixture.groupReads')) > readsBefore);
+
   await evaluate(
     `document.querySelectorAll('.group-tools-group input').forEach(n=>n.click())`,
   );
@@ -108,6 +145,7 @@ export async function verifyGroups({
     `document.querySelector('[aria-label="群邀请链接"]')!==null`,
     'join dialog',
   );
+  await verifyAccountRefresh();
   await evaluate(
     `document.querySelectorAll('.group-tools-account input').forEach(n=>{if(!n.checked)n.click()})`,
   );
@@ -169,6 +207,17 @@ export async function verifyGroups({
     `document.querySelectorAll('.group-tools-group').length===5`,
     'all joined groups including non-admin groups listed',
   );
+  await verifyAccountRefresh();
+  await wait(
+    `!document.querySelector('[aria-label="刷新群组"]').disabled`,
+    'leave group refresh available',
+  );
+  await tap('[aria-label="刷新群组"]');
+  await wait(
+    `document.querySelectorAll('.group-tools-group').length===5 && !document.querySelector('[aria-label="刷新群组"]').disabled`,
+    'leave refresh reloads all joined groups',
+  );
+
   for (const groupId of ['10001@g.us', '10003@g.us'])
     await click(`.group-tools-group[data-group-id="${groupId}"] input`);
   assert.equal(

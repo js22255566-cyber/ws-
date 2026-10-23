@@ -29,7 +29,9 @@ describe('native group adapter verification', () => {
       isReady: true,
       conn: { getMyUserWid: () => ownerId },
       whatsapp: {
-        queryAllGroups: jest.fn(async () => structuredClone(groups)),
+        functions: {
+          queryAllGroups: jest.fn(async () => structuredClone(groups)),
+        },
         ChatStore: { get: id => chats.get(id) },
       },
       group: {
@@ -82,8 +84,21 @@ describe('native group adapter verification', () => {
       true,
     );
     expect(
-      wpp.whatsapp.queryAllGroups.mock.calls.length,
+      wpp.whatsapp.functions.queryAllGroups.mock.calls.length,
     ).toBeGreaterThanOrEqual(2);
+  });
+  it('loads groups from the packaged WA-JS functions namespace without a flat alias', async () => {
+    expect(wpp.whatsapp.queryAllGroups).toBeUndefined();
+    expect(await groupGuest({ ownerId })).toMatchObject({
+      groups: [{ id: groupId, name: '测试群', admin: true }],
+    });
+  });
+  it('joins a valid invite using the real namespace and verifies membership', async () => {
+    groups = [];
+    expect(
+      await groupGuest({ ownerId, task: task('join'), execute: true }),
+    ).toMatchObject({ status: 'success', groupId });
+    expect(wpp.group.join).toHaveBeenCalledTimes(1);
   });
   it('accepts an applied change even when the request later throws', async () => {
     wpp.group.setProperty.mockImplementation(async () => {
@@ -147,7 +162,7 @@ describe('native group adapter verification', () => {
     expect(
       await groupGuest({ ownerId, task: task(), execute: true }),
     ).toMatchObject({ status: 'failed', retryable: false });
-    expect(wpp.whatsapp.queryAllGroups).not.toHaveBeenCalled();
+    expect(wpp.whatsapp.functions.queryAllGroups).not.toHaveBeenCalled();
   });
   it('keeps in-flight requests visible rather than repeating them', async () => {
     let finish!: () => void;
@@ -181,7 +196,9 @@ describe('native group adapter verification', () => {
     ).toMatchObject({ status: 'approval' });
   });
   it('does not assume success or mutate when fresh state cannot be read', async () => {
-    wpp.whatsapp.queryAllGroups.mockRejectedValue(new Error('offline'));
+    wpp.whatsapp.functions.queryAllGroups.mockRejectedValue(
+      new Error('offline'),
+    );
     expect(
       await groupGuest({ ownerId, task: task(), execute: true }),
     ).toMatchObject({ status: 'uncertain' });

@@ -69,6 +69,8 @@ export default observer(function GroupTools({
   const [interval, setInterval] = useState(queue.state.intervals[mode]);
   const [deleteGroup, setDeleteGroup] = useState(true);
   const [loading, setLoading] = useState(false);
+  const [refreshingAccounts, setRefreshingAccounts] = useState(false);
+  const [accountNotice, setAccountNotice] = useState('');
   const [notice, setNotice] = useState('');
   const [refresh, setRefresh] = useState(0);
   const [confirm, setConfirm] = useState<GroupTarget[]>();
@@ -215,6 +217,21 @@ export default observer(function GroupTools({
       setNotice(String(error));
     }
   };
+  const refreshAccounts = async () => {
+    setRefreshingAccounts(true);
+    setAccountNotice('正在刷新账号状态…');
+    try {
+      const result = await runtime.refreshAccounts();
+      setAccountNotice(
+        `已刷新 ${result.refreshed} 个账号${result.failed ? `，${result.failed} 个读取失败，请稍后重试` : ''}`,
+      );
+      setRefresh(n => n + 1);
+    } catch (error) {
+      setAccountNotice(`刷新账号失败：${String(error)}`);
+    } finally {
+      setRefreshingAccounts(false);
+    }
+  };
   const closePointer = (event: React.PointerEvent) => {
     if (event.button === 0) {
       event.preventDefault();
@@ -248,14 +265,18 @@ export default observer(function GroupTools({
               选择 WhatsApp 账号{' '}
               <button
                 type="button"
-                aria-label="刷新群组列表"
-                disabled={loading || active}
-                onClick={() => setRefresh(n => n + 1)}
+                aria-label="刷新账号列表"
+                title="刷新账号状态"
+                disabled={refreshingAccounts || active}
+                onClick={() => {
+                  void refreshAccounts();
+                }}
               >
                 ↻
               </button>
             </h3>
             <p>显示已登录账号，支持多选</p>
+            {accountNotice && <p role="status">{accountNotice}</p>}
             <input
               aria-label="搜索账号"
               placeholder="搜索号码、昵称、备注"
@@ -353,6 +374,20 @@ export default observer(function GroupTools({
                     ? '只显示当前账号可管理的群组'
                     : '选择需要退出的群组，按账号分别执行'}
                 </p>
+                <button
+                  type="button"
+                  className="group-tools-refresh"
+                  aria-label="刷新群组"
+                  disabled={
+                    active ||
+                    loading ||
+                    refreshingAccounts ||
+                    chosen.length === 0
+                  }
+                  onClick={() => setRefresh(n => n + 1)}
+                >
+                  {loading ? '正在刷新群组…' : '刷新群组'}
+                </button>
                 <div className="group-tools-filters">
                   <select
                     aria-label="筛选群组所属账号"
@@ -458,7 +493,11 @@ export default observer(function GroupTools({
                     ))
                   )}
                   {!loading && visibleGroups.length === 0 && (
-                    <p>请选择账号，或刷新群组列表</p>
+                    <p>
+                      {chosen.length === 0
+                        ? '请先选择 WhatsApp 账号，再点击刷新群组'
+                        : '暂无符合条件的群组，可点击刷新群组重试'}
+                    </p>
                   )}
                 </div>
               </>

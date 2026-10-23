@@ -1,4 +1,5 @@
 /* eslint-disable no-await-in-loop, no-continue, unicorn/consistent-function-scoping -- Serialized guest function; each group is read and mutated sequentially. */
+import type * as WhatsAppAPI from '@wppconnect/wa-js/dist/whatsapp';
 import type { GroupTask, GroupResult } from './types';
 
 export async function groupGuest(request: {
@@ -48,9 +49,11 @@ export async function groupGuest(request: {
   // This native query requests the current joined groups rather than treating a
   // successful mutation promise or an old local model as confirmation.
   const fresh = async (): Promise<any[]> => {
-    if (typeof wpp.whatsapp?.queryAllGroups !== 'function')
-      throw new Error('当前 WhatsApp 接口不能核验群组状态，请刷新账号');
-    const values = await wpp.whatsapp.queryAllGroups();
+    const api = wpp.whatsapp as typeof WhatsAppAPI | undefined;
+    const query = api?.functions?.queryAllGroups;
+    if (typeof query !== 'function')
+      throw new Error('群组读取接口尚未就绪，请刷新群组后重试');
+    const values = await query();
     if (!Array.isArray(values)) throw new Error('群组状态返回异常');
     return values;
   };
