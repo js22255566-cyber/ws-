@@ -12,7 +12,7 @@
 详细操作及验收步骤见 [开发与测试说明](docs/ZL-WA.md)。
 本轮新增的账户分组、卡片和菜单说明见 [分组账户侧栏](docs/ACCOUNTS.md)。
 代理、两步发送翻译和文字群发说明见 [账号工具](docs/ACCOUNT-TOOLS.md)。
-上游说明保留在 [README.upstream.md](README.upstream.md)，许可证见 [LICENSE.md](LICENSE.md)。
+基于开源项目 [Ferdium](https://github.com/ferdium/ferdium-app)（Apache-2.0），许可证见 [LICENSE.md](LICENSE.md)。
 
 ## Windows 开发
 

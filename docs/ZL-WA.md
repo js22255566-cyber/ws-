@@ -55,7 +55,6 @@ ZL-WA 7.2.5 的应用更新来自 `zhenglin1885-arch/ZL-WA` 的 GitHub Releases�
 Windows 签名校验配置保持开启；当前通过浏览器下载和用户安装。后续实现自动下载安装时，需要配置本项目自己的代码签名身份。
 
 发布步骤：更新 `package.json` 的版本号，提交对应 `v版本号` 标签并创建同名草稿 Release，运行 Windows 工作流并填写该标签。工作流检查版本号、执行测试、打包安装版及便携版、生成 SHA-256，然后上传附件并发布。正式标签标为正式版和 Latest，带后缀标签标为预发布。版本号与标签不一致时停止构建。用户端不会读取草稿。
-上游自动发布与维护工作流保留在 `.github/upstream-workflows`，不再由 GitHub Actions 执行。
 
 ## Windows 人工验收
 
