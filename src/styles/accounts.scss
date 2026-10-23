@@ -13,6 +13,16 @@
 .app--accounts .app__service {
   min-width: 0;
 }
+// The workspace drawer is not rendered in ZL-WA. Neutralise the upstream
+// offset that slid it off-screen (translateX(-drawer width)); otherwise that
+// offset pushes the account sidebar out of view instead.
+.app.app--accounts {
+  --workspace-drawer-width: 0px !important;
+}
+.app.app--accounts .app__content {
+  width: 100% !important;
+  transform: none !important;
+}
 
 .account-sidebar {
   // Upstream's reset gives every div height: 100%; cards need natural height.
