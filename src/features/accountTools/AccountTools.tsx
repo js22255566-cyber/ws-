@@ -1,9 +1,11 @@
 /* eslint-disable no-void -- UI event handlers start internally handled asynchronous operations. */
+import { Divider, Menu, MenuItem } from '@mui/material';
 import {
   mdiAccountGroupOutline,
   mdiAccountMultiplePlusOutline,
   mdiAccountMultipleMinusOutline,
   mdiCardAccountDetailsOutline,
+  mdiDotsHorizontalCircleOutline,
   mdiSendOutline,
   mdiShieldLockOutline,
   mdiTranslate,
@@ -635,6 +637,7 @@ const AccountTools = observer(({ stores }: StoresProps) => {
   const [panel, setPanel] = useState('');
   const [bulk, setBulk] = useState(false);
   const [groupMode, setGroupMode] = useState<GroupMode>();
+  const [moreAnchor, setMoreAnchor] = useState<HTMLElement | null>(null);
   useEffect(() => startTranslations(stores), [stores]);
   const customers = getCustomerRuntime(stores);
   useEffect(() => {
@@ -677,11 +680,11 @@ const AccountTools = observer(({ stores }: StoresProps) => {
           textColor={stores.settings.app.translationTextColor}
         />
       )}
+      {/* Frequent tools stay on the rail; occasional ones live under 更多. */}
       <nav className="account-tools-rail" aria-label="账号工具栏">
         {(
           [
             ['customer', '客户', '客户资料', mdiCardAccountDetailsOutline],
-            ['proxy', '代理', '账号代理', mdiShieldLockOutline],
             ['translation', '翻译', '收发翻译', mdiTranslate],
           ] as const
         ).map(([id, label, title, icon]) => (
@@ -696,7 +699,6 @@ const AccountTools = observer(({ stores }: StoresProps) => {
             <span>{label}</span>
           </button>
         ))}
-        <hr className="account-tools-rail__separator" />
         <button
           type="button"
           title="批量发送"
@@ -706,27 +708,56 @@ const AccountTools = observer(({ stores }: StoresProps) => {
           <RailIcon path={mdiSendOutline} />
           <span>群发</span>
         </button>
+        <button
+          type="button"
+          title="代理、群组管理、批量进群和退群"
+          aria-haspopup="menu"
+          aria-expanded={Boolean(moreAnchor)}
+          aria-pressed={panel === 'proxy' || Boolean(groupMode)}
+          onClick={event => setMoreAnchor(event.currentTarget)}
+        >
+          <RailIcon path={mdiDotsHorizontalCircleOutline} />
+          <span>更多</span>
+        </button>
+      </nav>
+      <Menu
+        anchorEl={moreAnchor}
+        open={Boolean(moreAnchor)}
+        onClose={() => setMoreAnchor(null)}
+        anchorOrigin={{ vertical: 'top', horizontal: 'left' }}
+        transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+        className="account-context-menu account-tools-more-menu"
+      >
+        <MenuItem
+          selected={panel === 'proxy'}
+          onClick={() => {
+            setMoreAnchor(null);
+            setPanel(panel === 'proxy' ? '' : 'proxy');
+          }}
+        >
+          <RailIcon path={mdiShieldLockOutline} />
+          <span>账号代理</span>
+        </MenuItem>
+        <Divider />
         {(
           [
-            ['speech', '群组', '群组发言管理', mdiAccountGroupOutline],
-            ['join', '进群', '批量进群', mdiAccountMultiplePlusOutline],
-            ['leave', '退群', '批量退群', mdiAccountMultipleMinusOutline],
+            ['speech', '群组发言管理', mdiAccountGroupOutline],
+            ['join', '批量进群', mdiAccountMultiplePlusOutline],
+            ['leave', '批量退群', mdiAccountMultipleMinusOutline],
           ] as const
-        ).map(([mode, label, title, icon]) => (
-          <button
-            type="button"
+        ).map(([mode, label, icon]) => (
+          <MenuItem
             key={mode}
-            title={title}
-            aria-label={label}
-            aria-haspopup="dialog"
-            aria-pressed={groupMode === mode}
-            onClick={() => setGroupMode(mode)}
+            onClick={() => {
+              setMoreAnchor(null);
+              setGroupMode(mode);
+            }}
           >
             <RailIcon path={icon} />
             <span>{label}</span>
-          </button>
+          </MenuItem>
         ))}
-      </nav>
+      </Menu>
       {groupMode && (
         <GroupTools
           stores={stores}

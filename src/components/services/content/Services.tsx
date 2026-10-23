@@ -2,36 +2,12 @@ import { observer } from 'mobx-react';
 import ms from 'ms';
 import { Component, type ReactElement } from 'react';
 import Confetti from 'react-confetti';
-import {
-  type WrappedComponentProps,
-  defineMessages,
-  injectIntl,
-} from 'react-intl';
+import { type WrappedComponentProps, injectIntl } from 'react-intl';
 import withStyles, { type WithStylesProps } from 'react-jss';
-import { Link } from 'react-router-dom';
 import type Service from '../../../models/Service';
 import Appear from '../../ui/effects/Appear';
 import ServiceView from './ServiceView';
 
-const messages = defineMessages({
-  getStarted: {
-    id: 'services.getStarted',
-    defaultMessage: 'Get started',
-  },
-  login: {
-    id: 'services.login',
-    defaultMessage: 'Please login to use Ferdium.',
-  },
-  serverless: {
-    id: 'services.serverless',
-    defaultMessage: 'Use Ferdium without an Account',
-  },
-  serverInfo: {
-    id: 'services.serverInfo',
-    defaultMessage:
-      'Optionally, you can change your Ferdium server by clicking the cog in the bottom left corner. If you are switching over (from one of the hosted servers) to using Ferdium without an account, please be informed that you can export your data from that server and subsequently import it using the Help menu to resurrect all your workspaces and configured services!',
-  },
-});
 
 const styles = {
   confettiContainer: {
@@ -102,7 +78,6 @@ class Services extends Component<IProps, IState> {
       userHasCompletedSignup,
       classes,
       isSpellcheckerEnabled,
-      intl,
     } = this.props;
 
     const { showConfetti } = this.state;
@@ -127,9 +102,9 @@ class Services extends Component<IProps, IState> {
                 style={{ maxHeight: '50vh' }}
               />
               <Appear transitionName="slideUp">
-                <Link to="/settings/recipes" className="button">
-                  {intl.formatMessage(messages.getStarted)}
-                </Link>
+                <p className="services__no-service-hint">
+                  在左侧分组中点击「新增会话」，添加第一个 WhatsApp 账号
+                </p>
               </Appear>
             </div>
           </Appear>

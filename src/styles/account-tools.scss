@@ -1063,3 +1063,13 @@
 .group-tools-dialog .group-tools-log {
   flex: 1 0 140px;
 }
+
+// "更多" menu on the tool rail.
+.account-tools-more-menu .MuiPaper-root {
+  min-width: 168px;
+  svg {
+    width: 18px;
+    height: 18px;
+    flex-shrink: 0;
+  }
+}

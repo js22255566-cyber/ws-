@@ -236,7 +236,7 @@
   &__cards {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 2px;
     padding: 6px 0 1px;
     animation: zl-fade-in var(--zl-duration) var(--zl-ease);
   }
@@ -247,71 +247,66 @@
   }
 }
 
+// Compact two-line row: avatar · name + unread / number · remark. Secondary
+// actions appear on hover or keyboard focus, like rows in Mail or Messages,
+// so more accounts fit on screen without visual noise.
 .account-card {
   position: relative;
-  border-radius: var(--zl-radius-lg);
-  min-height: 86px;
-  background: var(--zl-bg-elevated);
-  box-shadow:
-    0 0 0 1px var(--zl-separator),
-    var(--zl-shadow-card);
+  border-radius: var(--zl-radius-md);
+  background: transparent;
   transition:
     background-color var(--zl-duration-fast) var(--zl-ease),
     box-shadow var(--zl-duration-fast) var(--zl-ease),
-    opacity var(--zl-duration) var(--zl-ease),
-    transform var(--zl-duration) var(--zl-ease-out);
+    opacity var(--zl-duration) var(--zl-ease);
 
   &:hover {
-    background: color-mix(in srgb, var(--zl-bg-elevated) 94%, var(--zl-label));
+    background: var(--zl-hover);
   }
   &.is-active {
     background: var(--zl-accent-tint);
-    box-shadow:
-      0 0 0 1.5px var(--zl-accent),
-      var(--zl-shadow-card);
+    box-shadow: inset 0 0 0 1px rgba(var(--zl-accent-rgb), 0.45);
   }
   &.is-dragging {
     opacity: 0.45;
-    transform: scale(0.98);
   }
-  // Insertion indicator: an accent line with a leading dot, as in Finder.
+  // Insertion indicator: an accent line, as in Finder.
   &.drop-before::before,
   &.drop-after::before {
     content: '';
     position: absolute;
     left: 6px;
     right: 6px;
-    height: 3px;
-    border-radius: 2px;
+    height: 2px;
+    border-radius: 1px;
     background: var(--zl-accent);
     pointer-events: none;
   }
   &.drop-before::before {
-    top: -5px;
+    top: -2px;
   }
   &.drop-after::before {
-    bottom: -5px;
+    bottom: -2px;
   }
 
   &__select {
     width: 100%;
-    min-height: 61px;
-    padding: 10px 52px 0 11px;
+    min-height: 52px;
+    padding: 7px 10px 7px 8px;
     display: flex;
     align-items: center;
     gap: 10px;
     text-align: left;
-    border-radius: var(--zl-radius-lg) var(--zl-radius-lg) 0 0;
+    border-radius: var(--zl-radius-md);
   }
   &__portrait {
     position: relative;
-    flex: 0 0 42px;
-    height: 42px;
+    flex: 0 0 38px;
+    height: 38px;
     display: block;
     img,
     .account-card__initial {
-      width: 42px;
-      height: 42px;
+      width: 38px;
+      height: 38px;
       border-radius: 50%;
       object-fit: cover;
     }
@@ -327,7 +322,7 @@
     background: linear-gradient(180deg, #a5abb7, #858a95);
     color: #ffffff;
     font-weight: 600;
-    font-size: 19px;
+    font-size: 17px;
   }
   &__identity {
     display: flex;
@@ -338,61 +333,92 @@
   }
   &__name {
     color: var(--zl-label);
-    font-size: 14px;
+    font-size: 13px;
     font-weight: 600;
     text-overflow: ellipsis;
     overflow: hidden;
     white-space: nowrap;
   }
-  &__phone {
+  &__meta {
+    display: flex;
+    align-items: baseline;
+    min-width: 0;
+    gap: 6px;
     font-size: var(--zl-text-callout);
     color: var(--zl-label-secondary);
-    font-variant-numeric: tabular-nums;
     white-space: nowrap;
+  }
+  &__phone {
+    flex-shrink: 0;
+    max-width: 100%;
     overflow: hidden;
     text-overflow: ellipsis;
+    font-variant-numeric: tabular-nums;
   }
-  &__more {
+  &__note {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--zl-label-tertiary);
+    &::before {
+      content: '·';
+      margin-right: 6px;
+    }
+  }
+  // Collapsed rail only (see .is-collapsed below).
+  &__remark {
+    display: none;
+  }
+  // Hover / focus actions, overlaying the unread count while shown.
+  &__actions {
     position: absolute;
-    right: 2px;
-    top: 3px;
-    width: 28px;
-    height: 28px;
-    padding: 4px !important;
+    top: 50%;
+    right: 6px;
     display: flex;
     align-items: center;
-    justify-content: center;
-    border-radius: var(--zl-radius-sm);
-    color: var(--zl-label-secondary) !important;
-    svg {
-      width: 20px !important;
-      height: 20px !important;
+    gap: 2px;
+    padding-left: 12px;
+    transform: translateY(-50%);
+    opacity: 0;
+    pointer-events: none;
+    // Same colour as the hovered row underneath: hover tint over sidebar.
+    background:
+      linear-gradient(90deg, transparent, var(--zl-hover) 12px),
+      linear-gradient(90deg, transparent, var(--zl-bg-sidebar) 12px);
+    transition: opacity var(--zl-duration-fast) var(--zl-ease);
+    button {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 28px;
+      height: 28px;
+      padding: 4px !important;
+      border-radius: var(--zl-radius-sm);
+      color: var(--zl-label-secondary) !important;
+      svg {
+        width: 20px !important;
+        height: 20px !important;
+      }
+      &:hover {
+        background: var(--zl-hover);
+        color: var(--zl-label) !important;
+      }
     }
-    &:hover {
-      background: var(--zl-hover);
-      color: var(--zl-label) !important;
-    }
+  }
+  &:hover &__actions,
+  &:focus-within &__actions {
+    opacity: 1;
+    pointer-events: auto;
+  }
+  &.is-active &__actions {
+    background: linear-gradient(
+      90deg,
+      transparent,
+      color-mix(in srgb, var(--zl-bg-sidebar) 80%, var(--zl-accent)) 12px
+    );
   }
   &__sleep {
-    position: absolute;
-    right: 34px;
-    top: 4px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 26px;
-    height: 26px;
-    padding: 2px !important;
-    border-radius: 50%;
-    color: var(--zl-label-secondary) !important;
-    svg {
-      width: 20px !important;
-      height: 20px !important;
-    }
-    &:hover {
-      background: var(--zl-hover);
-      color: var(--zl-label) !important;
-    }
+    border-radius: 50% !important;
     &.is-sleeping {
       background: color-mix(in srgb, var(--zl-yellow) 22%, transparent);
       color: color-mix(
@@ -402,38 +428,32 @@
       ) !important;
     }
   }
-  &__remark {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    margin: 0 8px 7px 62px;
-    padding: 1px 4px !important;
-    max-width: calc(100% - 72px);
-    text-align: left;
-    border-radius: var(--zl-radius-xs);
-    font-size: var(--zl-text-callout) !important;
-    color: var(--zl-label-secondary) !important;
-    &:hover {
-      background: var(--zl-hover);
-      color: var(--zl-label) !important;
+  // A sleeping account keeps its moon visible without hovering.
+  &:has(.account-card__sleep.is-sleeping) .account-card__actions {
+    opacity: 1;
+    pointer-events: auto;
+    background: none;
+    .account-card__edit,
+    .account-card__more {
+      display: none;
     }
-    span {
-      text-overflow: ellipsis;
-      white-space: nowrap;
-      overflow: hidden;
-    }
-    &.is-empty span {
-      color: var(--zl-label-tertiary);
+  }
+  &:has(.account-card__sleep.is-sleeping):hover .account-card__actions,
+  &:has(.account-card__sleep.is-sleeping):focus-within .account-card__actions {
+    .account-card__edit,
+    .account-card__more {
+      display: flex;
     }
   }
   // Confirmed: red digits, transparent background, 20px / 800.
   &__unread {
+    flex-shrink: 0;
     background: transparent;
     color: var(--zl-unread);
     font-size: 20px;
     font-weight: 800;
     line-height: 1.2;
-    padding: 2px 5px;
+    padding: 0 2px;
     font-variant-numeric: tabular-nums;
   }
 }
@@ -445,7 +465,7 @@
   height: 12px;
   bottom: -1px;
   right: -2px;
-  border: 2px solid var(--zl-bg-elevated);
+  border: 2px solid var(--zl-bg-sidebar);
   border-radius: 50%;
   background: var(--zl-yellow);
   transition: background-color var(--zl-duration) var(--zl-ease);
@@ -461,7 +481,7 @@
   }
 }
 .account-card.is-active .account-status {
-  border-color: color-mix(in srgb, var(--zl-bg-elevated) 82%, var(--zl-accent));
+  border-color: color-mix(in srgb, var(--zl-bg-sidebar) 80%, var(--zl-accent));
 }
 
 // The upstream div reset otherwise stretches MUI's invisible focus sentinels
@@ -586,10 +606,8 @@
   .account-group__header,
   .account-group__empty,
   .account-card__identity,
-  .account-card__more,
-  .account-card__sleep,
+  .account-card__actions,
   .account-card__remark svg,
-  .account-sidebar__footer > button:nth-child(2),
   .account-sidebar__footer span {
     display: none;
   }
@@ -605,23 +623,35 @@
     padding: 0;
   }
   .account-card {
-    min-height: 78px;
+    min-height: 0;
   }
   .account-card__select {
-    min-height: 54px;
+    min-height: 48px;
     padding: 6px 0 0;
     justify-content: center;
   }
   .account-card__remark {
+    display: flex;
     justify-content: center;
     width: calc(100% - 8px);
     max-width: none;
-    margin: 4px 4px 7px;
+    margin: 2px 4px 6px;
+    padding: 1px 2px !important;
+    border-radius: var(--zl-radius-xs);
     font-size: 12px !important;
+    color: var(--zl-label-secondary) !important;
+    span {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    &.is-empty span {
+      color: var(--zl-label-tertiary);
+    }
   }
   .account-card__unread {
     position: absolute;
-    top: 2px;
+    top: 0;
     right: 2px;
   }
   .account-sidebar__footer {

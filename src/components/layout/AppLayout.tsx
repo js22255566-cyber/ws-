@@ -1,4 +1,5 @@
-// ZL-WA modification: account-sidebar layout.
+// ZL-WA modification: account-sidebar layout. Workspaces and Todos are not
+// shown: accounts are grouped in the sidebar instead.
 import { ipcRenderer } from 'electron';
 import { TitleBar } from 'electron-react-titlebar/renderer';
 import { observer } from 'mobx-react';
@@ -21,8 +22,6 @@ import InfoBar from '../ui/InfoBar';
 import ErrorBoundary from '../util/ErrorBoundary';
 
 import { isMac, isWindows } from '../../environment';
-import Todos from '../../features/todos/containers/TodosScreen';
-import WorkspaceSwitchingIndicator from '../../features/workspaces/components/WorkspaceSwitchingIndicator';
 import AppUpdateInfoBar from '../AppUpdateInfoBar';
 import Icon from '../ui/icon';
 
@@ -115,7 +114,6 @@ class AppLayout extends Component<PropsWithChildren<IProps>, IState> {
     const {
       classes,
       isFullScreen,
-      workspacesDrawer,
       sidebar,
       services,
       showServicesUpdatedInfoBar,
@@ -160,10 +158,8 @@ class AppLayout extends Component<PropsWithChildren<IProps>, IState> {
               />
             )}
             <div className={`app__content ${classes.appContent}`}>
-              {workspacesDrawer}
               {sidebar}
               <div className="app__service">
-                <WorkspaceSwitchingIndicator />
                 {!areRequiredRequestsSuccessful &&
                   showRequiredRequestsError && (
                     <InfoBar
@@ -232,7 +228,6 @@ class AppLayout extends Component<PropsWithChildren<IProps>, IState> {
                 <Outlet />
               </div>
               {this.props.accountTools}
-              <Todos />
             </div>
           </div>
         </ErrorBoundary>

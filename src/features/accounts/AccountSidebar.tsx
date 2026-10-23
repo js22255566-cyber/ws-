@@ -114,6 +114,12 @@ export default class AccountSidebar extends Component<StoresProps, State> {
   /** How long an informational notice stays visible (like a HUD). */
   static readonly INFO_NOTICE_MS = 4000;
 
+  componentDidMount(): void {
+    // Workspaces are not offered in ZL-WA; never leave accounts filtered by a
+    // workspace selected in an older version.
+    if (workspaceStore.isAnyWorkspaceActive) workspaceActions.deactivate();
+  }
+
   componentWillUnmount(): void {
     clearTimeout(this.noticeTimer);
   }
@@ -463,7 +469,7 @@ export default class AccountSidebar extends Component<StoresProps, State> {
         onDragStart={event => {
           if (
             (event.target as HTMLElement).closest(
-              '.account-card__more, .account-card__sleep, .account-card__remark',
+              '.account-card__actions, .account-card__remark',
             )
           ) {
             event.preventDefault();
@@ -507,10 +513,17 @@ export default class AccountSidebar extends Component<StoresProps, State> {
             <span className="account-card__name" title={name}>
               {name}
             </span>
-            <span className="account-card__phone">
-              {isWhatsApp
-                ? profile.phone || (profile.ownerId ? '' : '尚未登录')
-                : service.recipe.name}
+            <span className="account-card__meta">
+              <span className="account-card__phone">
+                {isWhatsApp
+                  ? profile.phone || (profile.ownerId ? '' : '尚未登录')
+                  : service.recipe.name}
+              </span>
+              {prefs.remark && (
+                <span className="account-card__note" title={prefs.remark}>
+                  {prefs.remark}
+                </span>
+              )}
             </span>
           </span>
           {unread > 0 && (
@@ -521,6 +534,8 @@ export default class AccountSidebar extends Component<StoresProps, State> {
         </button>
         <button
           type="button"
+          // Shown only in the collapsed rail; expanded cards show the remark
+          // inline and edit it from the hover actions or the menu.
           className={`account-card__remark ${prefs.remark ? '' : 'is-empty'}`}
           onClick={() =>
             this.config.collapsed
@@ -534,35 +549,48 @@ export default class AccountSidebar extends Component<StoresProps, State> {
           <Icon icon={mdiPencilOutline} size={0.6} />
           <span>{prefs.remark || '暂无备注'}</span>
         </button>
-        {isWhatsApp && (
+        <div className="account-card__actions">
           <button
             type="button"
-            className={`account-card__sleep ${sleeping ? 'is-sleeping' : ''}`}
-            disabled={this.state.busy}
-            aria-pressed={sleeping}
-            aria-label={`${name}：${sleeping || !service.isEnabled ? '打开会话' : '休眠会话'}`}
-            title={
-              sleeping || !service.isEnabled
-                ? '打开会话（恢复登录页面）'
-                : '休眠会话（关闭页面，保留登录）'
+            className="account-card__edit"
+            aria-label={`${name}：编辑备注`}
+            title="编辑备注"
+            onClick={() =>
+              this.openDialog('remark', service.id, prefs.remark ?? '')
             }
-            onClick={() => this.toggleSleep(service)}
           >
-            <Icon icon={mdiWeatherNight} size={1} />
+            <Icon icon={mdiPencilOutline} size={0.8} />
           </button>
-        )}
-        <button
-          type="button"
-          className="account-card__more"
-          aria-label={`${name} 的会话菜单`}
-          onClick={event =>
-            this.setState({
-              menu: { id: service.id, anchor: event.currentTarget },
-            })
-          }
-        >
-          <Icon icon={mdiDotsVertical} size={0.8} />
-        </button>
+          {isWhatsApp && (
+            <button
+              type="button"
+              className={`account-card__sleep ${sleeping ? 'is-sleeping' : ''}`}
+              disabled={this.state.busy}
+              aria-pressed={sleeping}
+              aria-label={`${name}：${sleeping || !service.isEnabled ? '打开会话' : '休眠会话'}`}
+              title={
+                sleeping || !service.isEnabled
+                  ? '打开会话（恢复登录页面）'
+                  : '休眠会话（关闭页面，保留登录）'
+              }
+              onClick={() => this.toggleSleep(service)}
+            >
+              <Icon icon={mdiWeatherNight} size={1} />
+            </button>
+          )}
+          <button
+            type="button"
+            className="account-card__more"
+            aria-label={`${name} 的会话菜单`}
+            onClick={event =>
+              this.setState({
+                menu: { id: service.id, anchor: event.currentTarget },
+              })
+            }
+          >
+            <Icon icon={mdiDotsVertical} size={0.8} />
+          </button>
+        </div>
       </article>
     );
   }
@@ -641,6 +669,13 @@ export default class AccountSidebar extends Component<StoresProps, State> {
                   'move',
                   service.id,
                   accountGroupId(this.config, service.id),
+                ),
+              ),
+              item('编辑备注', mdiPencilOutline, () =>
+                this.openDialog(
+                  'remark',
+                  service.id,
+                  this.config.accounts[service.id]?.remark ?? '',
                 ),
               ),
               item('修改昵称', mdiAccountEditOutline, () =>
@@ -968,14 +1003,6 @@ export default class AccountSidebar extends Component<StoresProps, State> {
           >
             <Icon icon={mdiCogOutline} size={0.8} />
             <span>设置</span>
-          </button>
-          <button
-            type="button"
-            onClick={() =>
-              this.props.actions.ui.openSettings({ path: 'services' })
-            }
-          >
-            原有服务
           </button>
         </footer>
         {this.renderMenu()}
