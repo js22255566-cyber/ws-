@@ -283,6 +283,20 @@ describe('verified group queue', () => {
     expect(() =>
       parseGroupLinks('http://chat.whatsapp.com/Abcdefghijklmnopqrstuv'),
     ).toThrow();
+    expect(
+      parseGroupLinks(
+        '加入我的群：https://chat.whatsapp.com/Abcdefghijklmnopqrstuv，谢谢\nchat.whatsapp.com/invite/Bbcdefghijklmnopqrstuv\nCbcdefghijklmnopqrstuv',
+      ),
+    ).toEqual([
+      'Abcdefghijklmnopqrstuv',
+      'Bbcdefghijklmnopqrstuv',
+      'Cbcdefghijklmnopqrstuv',
+    ]);
+    expect(() =>
+      parseGroupLinks(
+        'https://evil.example/chat.whatsapp.com/Abcdefghijklmnopqrstuv',
+      ),
+    ).toThrow('第 1 行');
     const state = defaultGroupState();
     state.intervals.speech = 0;
     expect(() => validateGroupState(state)).toThrow('执行间隔');

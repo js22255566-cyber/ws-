@@ -53,27 +53,47 @@ export const defaultGroupState = (): GroupToolsState => ({
   batches: [],
   intervals: { speech: 3, join: 5, leave: 5 },
 });
+// Invite codes are case-sensitive base64url-like tokens (usually 22 chars).
+const INVITE_CODE = '[A-Za-z0-9_-]{16,64}';
+const INVITE_LINK = new RegExp(
+  `(?<![\\w.@/-])(?:([a-z][a-z\\d+.-]*):\\/\\/)?(?:www\\.)?chat\\.whatsapp\\.com\\/(?:invite\\/)?(${INVITE_CODE})(?![\\w-])`,
+  'gi',
+);
+const ANY_URL = /\b(?:[a-z][\d+.a-z-]*:\/\/|www\.)\S+/i;
+const BARE_CODE = new RegExp(`^${INVITE_CODE}$`);
+
+/**
+ * Extracts unique invite codes, one or more per line. Lines may contain other
+ * text (e.g. a pasted "Join my group: https://chat.whatsapp.com/…" message),
+ * links without a scheme, the /invite/ form, tracking queries such as
+ * ?mode=ac_t, or just the code. Insecure (http) or foreign links are rejected
+ * with the line number rather than silently ignored.
+ */
 export function parseGroupLinks(text: string): string[] {
   const links = new Set<string>();
   const lines = text.split(/\r?\n/);
-  for (const [index, value] of lines.entries()) {
-    if (!value.trim()) continue;
-    let url: URL;
-    try {
-      url = new URL(value.trim());
-    } catch {
-      throw new Error(`第 ${index + 1} 行不是有效的群链接`);
+  for (const [index, raw] of lines.entries()) {
+    const value = raw.trim();
+    if (!value) continue;
+    const matches = [...value.matchAll(INVITE_LINK)];
+    if (matches.length === 0) {
+      if (BARE_CODE.test(value)) {
+        links.add(value);
+        continue;
+      }
+      throw new Error(
+        ANY_URL.test(value)
+          ? `第 ${index + 1} 行不是 WhatsApp 群邀请链接`
+          : `第 ${index + 1} 行不是有效的群链接`,
+      );
     }
-    if (
-      url.protocol !== 'https:' ||
-      url.hostname !== 'chat.whatsapp.com' ||
-      url.username ||
-      url.password ||
-      url.port ||
-      !/^\/[\w-]{16,64}\/?$/.test(url.pathname)
-    )
-      throw new Error(`第 ${index + 1} 行不是 WhatsApp 群邀请链接`);
-    links.add(url.pathname.replaceAll('/', ''));
+    for (const [, scheme, code] of matches) {
+      if (scheme && scheme.toLowerCase() !== 'https')
+        throw new Error(
+          `第 ${index + 1} 行不是 WhatsApp 群邀请链接（需 https）`,
+        );
+      links.add(code);
+    }
   }
   if (links.size === 0) throw new Error('请填写群邀请链接，一行一条');
   return [...links];

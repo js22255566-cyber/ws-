@@ -144,6 +144,78 @@ describe('native group adapter verification', () => {
     ).toMatchObject({ status: 'approval' });
     expect(native).toHaveBeenCalledWith('Abcdefghijklmnopqrstuv', true);
   });
+  it('bootloads the lazy WhatsApp invite bundle when the join job is not registered yet', async () => {
+    groups = [];
+    wpp.group.join.mockRejectedValue(
+      new TypeError('(0, d.joinGroupViaInvite) is not a function'),
+    );
+    const native = jest.fn(async () => {
+      groups = [{ id: groupId, announce: false }];
+      return { gid: groupId };
+    });
+    let loaded = false;
+    const loadModules = jest.fn((names: string[], done: () => void) => {
+      if (names.includes('WAWebGroupInviteLinkDrawer.react')) loaded = true;
+      done();
+    });
+    (window as any).require = name =>
+      name === 'Bootloader'
+        ? {
+            loadModules,
+            __debug: {
+              componentMap: new Map([['WAWebGroupInviteLinkDrawer.react', {}]]),
+            },
+          }
+        : name === 'WAWebGroupInviteJob' && loaded
+          ? { joinGroupViaInvite: native }
+          : name === '__debug'
+            ? { modulesMap: {} }
+            : undefined;
+    expect(
+      await groupGuest({ ownerId, task: task('join'), execute: true }),
+    ).toMatchObject({ status: 'success', groupId });
+    expect(loadModules).toHaveBeenCalledTimes(1);
+    expect(native).toHaveBeenCalledTimes(1);
+  });
+  it('waits for membership to propagate instead of reporting a failed join', async () => {
+    groups = [];
+    wpp.group.join.mockImplementation(async () => {
+      setTimeout(() => {
+        groups = [{ id: groupId, announce: false }];
+      }, 900);
+      return { id: groupId, pendingApproval: false };
+    });
+    expect(
+      await groupGuest({ ownerId, task: task('join'), execute: true }),
+    ).toMatchObject({ status: 'success', groupId });
+    expect(wpp.group.join).toHaveBeenCalledTimes(1);
+  });
+  it('reports approval when an approval-mode join returns without membership', async () => {
+    groups = [];
+    wpp.group.getGroupInfoFromInviteCode.mockResolvedValue({
+      id: groupId,
+      membershipApprovalMode: true,
+    });
+    wpp.group.join.mockResolvedValue({ id: groupId });
+    expect(
+      await groupGuest({ ownerId, task: task('join'), execute: true }),
+    ).toMatchObject({ status: 'approval', groupId });
+  });
+  it('explains an unavailable join interface without sending a request', async () => {
+    groups = [];
+    wpp.group.join.mockRejectedValue(
+      new TypeError('joinGroupViaInvite is not a function'),
+    );
+    (window as any).require = name =>
+      name === '__debug' ? { modulesMap: {} } : undefined;
+    const result = await groupGuest({
+      ownerId,
+      task: task('join'),
+      execute: true,
+    });
+    expect(result).toMatchObject({ status: 'not-done' });
+    expect(String((result as any).message)).toContain('刷新该账号页面');
+  });
   it('does not try another join adapter after an ambiguous transport failure', async () => {
     groups = [];
     wpp.group.join.mockRejectedValue(new Error('connection lost'));

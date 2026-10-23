@@ -20,6 +20,9 @@ export class GroupRuntime {
       save: state => ipcRenderer.invoke('group-tools-save', state),
       check: task => this.perform(task, false),
       execute: task => this.perform(task, true),
+      // Joining may first bootload WhatsApp's lazy invite bundle and then
+      // wait for the membership to propagate; allow for both.
+      timeout: 90_000,
     });
   }
 
@@ -136,7 +139,10 @@ export class GroupRuntime {
     execute: boolean,
   ): Promise<GroupResult> {
     const view = this.viewFor(task);
-    await ensureBulkLibrary(view);
+    await this.withTimeout(
+      ensureBulkLibrary(view),
+      '群组接口准备超时，未执行任何操作；请稍后重试',
+    );
     if (this.viewFor(task) !== view)
       throw new Error('账号窗口已变化，结果待核验');
     return view.executeJavaScript(

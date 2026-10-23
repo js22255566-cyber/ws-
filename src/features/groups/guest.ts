@@ -103,6 +103,8 @@ export async function groupGuest(request: {
     }
   };
   let attempted = false;
+  // Set once a join request returned without error in this call.
+  let submitted = false;
   const check = async (): Promise<GroupResult> => {
     let id = task.operation === 'join' ? task.groupId : task.target;
     let invite: any;
@@ -126,6 +128,12 @@ export async function groupGuest(request: {
         };
       if (!invite && task.attempts > 0)
         invite = await wpp.group.getGroupInfoFromInviteCode(task.target);
+      if (invite?.membershipApprovalMode && submitted)
+        return {
+          status: 'approval',
+          message: '进群申请已提交，等待管理员审批',
+          groupId: id,
+        };
       if (
         invite?.membershipApprovalMode &&
         task.attempts > 0 &&
@@ -251,41 +259,129 @@ export async function groupGuest(request: {
         const verified = await check();
         if (verified.status !== 'not-done') return verified;
         const info = await wpp.group.getGroupInfoFromInviteCode(task.target);
+        // Resolve the native invite job. Since WhatsApp 2.3000 it ships in a
+        // lazily bootloaded bundle (WA-JS issue #3734), so it is usually not
+        // registered until the "Invite via link" UI was opened once.
         let native: any;
         let host: any;
-        const registry = page.require?.('__debug')?.modulesMap;
-        const names =
-          registry instanceof Map
-            ? [...registry.keys()]
-            : Object.keys(registry || {});
-        for (const name of names) {
-          if (!/^waweb.*(?:group.*invite|invite.*group)/i.test(name)) continue;
+        let argumentsFor = (code: string) => [
+          code,
+          Boolean(info.membershipApprovalMode),
+        ];
+        const loadModule = (name: string): any[] => {
+          const found: any[] = [];
+          for (const load of [
+            () => page.require?.(name),
+            () => page.importNamespace?.(name),
+          ]) {
+            try {
+              const module = load();
+              if (module) found.push(module, module.default);
+            } catch {
+              /* Not registered (yet) under this loader. */
+            }
+          }
+          return found;
+        };
+        const adopt = (candidates: any[]): boolean => {
+          host = candidates.find(
+            value => typeof value?.joinGroupViaInvite === 'function',
+          );
+          if (host) {
+            native = host.joinGroupViaInvite;
+            return true;
+          }
+          // Higher-level native action: takes only the code and queries the
+          // approval mode itself.
+          host = candidates.find(
+            value => typeof value?.sendJoinGroupViaInvite === 'function',
+          );
+          if (host) {
+            native = host.sendJoinGroupViaInvite;
+            argumentsFor = (code: string) => [code];
+            return true;
+          }
+          return false;
+        };
+        const findNative = (): boolean => {
+          if (adopt(loadModule('WAWebGroupInviteJob'))) return true;
+          let registry: any;
           try {
-            const module = page.require(name);
-            const candidates = [module, module?.default];
-            host = candidates.find(
-              value => typeof value?.joinGroupViaInvite === 'function',
-            );
-            if (host) {
-              native = host.joinGroupViaInvite;
+            registry = page.require?.('__debug')?.modulesMap;
+          } catch {
+            /* Older loaders do not expose a debug registry. */
+          }
+          const names =
+            registry instanceof Map
+              ? [...registry.keys()]
+              : Object.keys(registry || {});
+          for (const name of names) {
+            if (
+              !/(?:group.*(?:invite|join)|(?:invite|join).*group)/i.test(name)
+            )
+              continue;
+            if (adopt(loadModule(name))) return true;
+          }
+          return false;
+        };
+        const bootloadInviteBundle = async (): Promise<void> => {
+          let bootloader: any;
+          for (const candidate of loadModule('Bootloader'))
+            if (typeof candidate?.loadModules === 'function') {
+              bootloader = candidate;
               break;
             }
-          } catch {
-            /* Unloaded native modules are not a valid adapter. */
+          if (!bootloader) return;
+          const map = bootloader.__debug?.componentMap;
+          const components = ['WAWebGroupInviteLinkDrawer.react'];
+          if (map && typeof map.keys === 'function')
+            for (const name of map.keys())
+              if (
+                /GroupInvite/i.test(String(name)) &&
+                !components.includes(name) &&
+                components.length < 4
+              )
+                components.push(name);
+          for (const component of components) {
+            if (map?.has && !map.has(component)) continue;
+            try {
+              await new Promise<void>((resolve, reject) => {
+                const timer = setTimeout(
+                  () => reject(new Error('bootload timeout')),
+                  10_000,
+                );
+                try {
+                  bootloader.loadModules(
+                    [component],
+                    () => {
+                      clearTimeout(timer);
+                      resolve();
+                    },
+                    'ZL-WA',
+                  );
+                } catch (loadError) {
+                  clearTimeout(timer);
+                  reject(loadError);
+                }
+              });
+            } catch {
+              continue; // Try the next candidate bundle.
+            }
+            if (findNative()) return;
           }
-        }
+        };
+        if (!findNative()) await bootloadInviteBundle();
+        if (!native) findNative();
         if (!native)
-          throw new Error('当前 WhatsApp 进群接口不兼容，请更新软件后重试');
+          throw new Error(
+            '当前 WhatsApp 网页未提供进群接口；请刷新该账号页面后重试，仍失败请反馈 WhatsApp 网页版本号',
+          );
         if (!own()) throw new Error('账号身份已变化，进群已取消');
         try {
           attempted = true;
-          const result = await native.call(
-            host,
-            task.target,
-            Boolean(info.membershipApprovalMode),
-          );
+          const result = await native.call(host, ...argumentsFor(task.target));
           joined = {
-            id: result?.gid || result?.id,
+            id: result?.gid || result?.id || info.id,
             pendingApproval: Boolean(
               result?.membershipApprovalMode ?? info.membershipApprovalMode,
             ),
@@ -304,6 +400,7 @@ export async function groupGuest(request: {
       }
       const id = idOf(joined?.id || joined);
       task.groupId = id || before.groupId;
+      submitted = true;
       if (joined?.pendingApproval) {
         current.result = {
           status: 'approval',
@@ -312,6 +409,31 @@ export async function groupGuest(request: {
         };
         return current.result;
       }
+      // The server accepts the join before the membership shows up in a fresh
+      // group query. Poll briefly with backoff instead of reporting a false
+      // failure (which would also trigger a needless second join request).
+      const deadline = Date.now() + 12_000;
+      let confirmed = await check();
+      for (
+        let delay = 600;
+        confirmed.status === 'not-done' && Date.now() < deadline;
+        delay = Math.min(delay * 2, 3000)
+      ) {
+        await new Promise(resolve => {
+          setTimeout(resolve, delay);
+        });
+        confirmed = await check();
+      }
+      if (confirmed.status === 'not-done')
+        confirmed = {
+          ...confirmed,
+          status: 'uncertain',
+          message:
+            '进群请求已提交，暂未确认加入；请稍后点击「刷新执行结果」核验',
+          retryable: false,
+        };
+      current.result = confirmed;
+      return confirmed;
     } else if (task.operation === 'leave') {
       // A retry after an acknowledged exit only performs the missing deletion.
       if (before.member) await wpp.group.leave(task.target);
